@@ -84,6 +84,14 @@
   #sliderWrap { font-size: 15px; width: 260px; }
   #sliderWrap input { width: 100%; }
 
+  /* Индикатор громкости в меню: полоска показывает, что слышит микрофон,
+     чёрная чёрточка — порог, после которого герой прыгает */
+  #meter { position: relative; height: 14px; margin-bottom: 8px; background: #ddd; border-radius: 7px; overflow: hidden; }
+  #meterFill { height: 100%; width: 0; background: #535353; }
+  #meterFill.hot { background: #d9534f; }
+  #meterMark { position: absolute; top: 0; bottom: 0; width: 3px; background: #000; }
+  #micStatus { font-size: 13px; color: #b3261e; margin-bottom: 6px; }
+
   /* ---------- Игроки ---------- */
   #playersBlock { display: flex; flex-direction: column; align-items: center; gap: 10px; width: 100%; }
 
@@ -232,9 +240,12 @@
     </div>
 
     <button id="btnTap" class="secondary hidden">Играть касанием (без микрофона)</button>
+    <button id="btnMic" class="secondary hidden">🎤 Играть голосом (включить микрофон)</button>
     <button id="btnCalib" class="secondary hidden">Откалибровать микрофон заново</button>
 
     <div id="sliderWrap" class="hidden">
+      <div id="meter"><div id="meterFill"></div><div id="meterMark"></div></div>
+      <div id="micStatus"></div>
       Порог громкости: <b id="sliderVal"></b><br>
       <small>меньше — прыгает от тихих звуков, больше — нужно громче</small>
       <input id="slider" type="range" min="10" max="400" step="1">
@@ -297,6 +308,10 @@ const btnTap   = document.getElementById('btnTap');
 const sliderWrap = document.getElementById('sliderWrap');
 const slider   = document.getElementById('slider');
 const sliderVal = document.getElementById('sliderVal');
+const btnMic    = document.getElementById('btnMic');
+const meterFill = document.getElementById('meterFill');
+const meterMark = document.getElementById('meterMark');
+const micStatus = document.getElementById('micStatus');
 // Элементы блока игроков
 const playersBlock = document.getElementById('playersBlock');
 const playerList   = document.getElementById('playerList');
@@ -348,7 +363,7 @@ async function setupMic() {
   if (analyser) { audioCtx.resume(); return true; }
 
   // Создаём звуковой движок сразу, пока действует «разрешение от касания»
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   audioCtx.resume();
 
   try {
@@ -361,23 +376,44 @@ async function setupMic() {
     analyser = audioCtx.createAnalyser();
     analyser.fftSize = 1024;                       // размер «окна» звука (~23 мс)
     timeBuf = new Float32Array(analyser.fftSize);
-    // Важно: НЕ подключаем analyser к динамикам, иначе будет эхо
     source.connect(analyser);
+    // Подстраховка: на части телефонов звук «течёт» в анализатор, только если цепочка
+    // доходит до выхода. Громкость на выходе нулевая, поэтому эха из динамика нет.
+    const silent = audioCtx.createGain();
+    silent.gain.value = 0;
+    analyser.connect(silent);
+    silent.connect(audioCtx.destination);
+    await audioCtx.resume();   // после окошка разрешения звук мог «заснуть» (особенно на iPhone)
+    micError = '';
     return true;
   } catch (err) {
     // Пользователь отказал, нет микрофона или страница открыта не по HTTPS
     console.warn('Микрофон недоступен:', err);
+    micError = (err && err.name) ? err.name : String(err);   // покажем причину на экране
     return false;
   }
 }
 
+let micError = '';   // название ошибки, если микрофон не включился (NotAllowedError — отказ в разрешении)
+
+// На телефонах звук может «заснуть» (звонок, другое приложение): любое касание экрана его будит
+document.addEventListener('pointerdown', () => {
+  if (audioCtx && audioCtx.state !== 'running') audioCtx.resume();
+}, true);
+
 // Возвращает текущую громкость (число от 0 до ~1)
 function readLevel() {
   if (!analyser) return 0;
+  if (audioCtx.state !== 'running') audioCtx.resume();   // «будим» звук, если он уснул
   analyser.getFloatTimeDomainData(timeBuf);
-  let sum = 0;
-  for (let i = 0; i < timeBuf.length; i++) sum += timeBuf[i] * timeBuf[i];
-  return Math.sqrt(sum / timeBuf.length);   // RMS
+  let sum = 0, peak = 0;
+  for (let i = 0; i < timeBuf.length; i++) {
+    sum += timeBuf[i] * timeBuf[i];
+    peak = Math.max(peak, Math.abs(timeBuf[i]));   // самый резкий звук в окошке (хлопок)
+  }
+  const rms = Math.sqrt(sum / timeBuf.length);      // обычная громкость
+  // Хлопок очень короткий и «размазывается» в обычной громкости, поэтому учитываем и пик
+  return Math.max(rms, peak * 0.35);
 }
 
 /* =====================================================================
@@ -757,7 +793,7 @@ btnFaceClear.addEventListener('click', () => {
 // 'playing' (идёт игра), 'over' (проигрыш)
 let state = 'menu';
 
-let threshold = 0.08;   // порог громкости: громче этого значения — прыжок
+let threshold = 0.05;   // порог громкости: громче этого значения — прыжок
 let level = 0;          // текущая громкость (обновляется каждый кадр)
 
 let hero, obstacles, clouds, speed, score, distSinceSpawn, nextGap, groundScroll, runTime;
@@ -1594,7 +1630,7 @@ function draw() {
   // Индикатор громкости: полоска показывает громкость, чёрточка — порог
   if (micEnabled) {
     const barX = 16, barY = 20, barW = 180, barH = 12;
-    const maxLevel = 0.5;   // громкость, при которой полоска заполнена полностью
+    const maxLevel = 0.3;   // громкость, при которой полоска заполнена полностью
     ctx.fillStyle = '#e2e2e2';
     ctx.fillStyle = COLOR; ctx.globalAlpha = 0.2;
     ctx.fillRect(barX, barY, barW, barH);
@@ -1636,8 +1672,9 @@ function updateCalibration() {
   }
 
   // Время вышло: считаем порог. Он выше самого громкого момента шума
-  // с запасом, но не меньше 0.06 (иначе в идеальной тишине будет слишком чувствителен).
-  threshold = Math.max(calibMax * 1.5 + 0.03, 0.06);
+  // с запасом, но не меньше 0.035 (иначе в идеальной тишине будет слишком чувствителен).
+  // Раньше нижний предел был 0.06, и на телефонах с тихим микрофоном голос его не пробивал.
+  threshold = Math.max(calibMax * 2 + 0.02, 0.035);
   slider.value = Math.round(threshold * 1000);   // показываем порог на ползунке
   startGame();
 }
@@ -1672,6 +1709,7 @@ function showOverlay(title, text, o) {
   shopBlock.classList.toggle('hidden', !o.shop);        // магазин нарядов
 
   btnTap.classList.toggle('hidden', !o.tap);
+  btnMic.classList.toggle('hidden', !o.mic);            // «Включить микрофон» (если играли касанием)
   btnCalib.classList.toggle('hidden', !o.calib);
   sliderWrap.classList.toggle('hidden', !o.slider);
   sliderVal.textContent = threshold.toFixed(3);
@@ -1690,7 +1728,7 @@ function showMenu(first) {
                 'Добавьте игроков и передавайте телефон по очереди: у каждого своё фото и свой рекорд.';
   showOverlay(first ? 'Крикни и прыгни' : 'Игроки',
               first ? intro : 'Выберите, кто играет, или добавьте игрока.',
-              { start: 'Играть', players: true, tap: !modeChosen, calib: micEnabled, slider: micEnabled });
+              { start: 'Играть', players: true, tap: !modeChosen, mic: modeChosen && !micEnabled, calib: micEnabled, slider: micEnabled });
 }
 
 // Экран результатов после проигрыша
@@ -2071,6 +2109,12 @@ btnStart.addEventListener('click', async () => {
   if (modeChosen) { startGame(); return; }
 
   // Иначе первый запуск: просим микрофон
+  await enableMic();
+});
+
+// Просим доступ к микрофону и, если он есть, замеряем фоновый шум.
+// Её же вызывает кнопка «Играть голосом», если раньше выбрали игру касанием.
+async function enableMic() {
   showOverlay('Микрофон', 'Разрешите доступ к микрофону в окошке браузера…', {});
   const ok = await setupMic();
   if (ok) {
@@ -2079,10 +2123,13 @@ btnStart.addEventListener('click', async () => {
     startCalibration();
   } else {
     showOverlay('Нет доступа к микрофону',
-      'Проверьте разрешение в настройках браузера.\nИгра должна быть открыта по HTTPS-ссылке (не как файл).\nМожно играть касанием экрана.',
+      'Проверьте разрешение в настройках браузера.\nИгра должна быть открыта по HTTPS-ссылке (не как файл) и в самом браузере, а не из мессенджера.\nМожно играть касанием экрана.' +
+      (micError ? '\n(причина: ' + micError + ')' : ''),
       { start: 'Попробовать ещё раз', tap: true });
   }
-});
+}
+
+btnMic.addEventListener('click', async () => { current = startIndex; await enableMic(); });
 
 // «Ещё раз»: тот же игрок пробует снова
 btnAgain.addEventListener('click', () => startGame());
@@ -2114,6 +2161,20 @@ slider.addEventListener('input', () => {
    requestAnimationFrame вызывает нашу функцию перед каждой перерисовкой
    экрана (обычно 60 раз в секунду) — это и есть «сердце» игры.
    ===================================================================== */
+// Индикатор громкости в меню: полоска показывает, что слышит микрофон (хлопните или крикните,
+// чтобы проверить), а чёрточка — порог прыжка. Если звука нет совсем, пишет подсказку.
+let zeroFrames = 0;   // сколько кадров подряд громкость была ровно нулевой
+function updateMeter() {
+  if (!micEnabled || overlay.classList.contains('hidden')) { zeroFrames = 0; return; }
+  const full = 0.3;   // громкость, при которой полоска заполнена
+  meterFill.style.width = (Math.min(1, level / full) * 100) + '%';
+  meterFill.classList.toggle('hot', level > threshold);
+  meterMark.style.left = (Math.min(1, threshold / full) * 100) + '%';
+  zeroFrames = (level === 0) ? zeroFrames + 1 : 0;
+  micStatus.textContent = (audioCtx && audioCtx.state !== 'running') ? '⚠ Звук приостановлен: коснитесь экрана'
+    : zeroFrames > 120 ? '⚠ Микрофон ничего не слышит: проверьте разрешение и не закрыт ли он пальцем' : '';
+}
+
 let lastTime = performance.now();
 
 function loop(now) {
@@ -2126,6 +2187,7 @@ function loop(now) {
   else update(dt);
 
   draw();
+  updateMeter();                      // индикатор громкости в меню
   if (menuShopOn) drawMenuShop(dt);   // вывеска магазина в меню (она слегка анимирована)
   if (podiumOn) drawPodium(dt);   // анимация пьедестала, когда он на экране
   requestAnimationFrame(loop);
