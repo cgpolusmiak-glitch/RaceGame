@@ -1,0 +1,2143 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<!-- Эта строка нужна, чтобы страница нормально выглядела на телефоне и не масштабировалась двойным тапом -->
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<!-- Просит поисковики (Google и другие) не показывать эту страницу в результатах поиска -->
+<meta name="robots" content="noindex, nofollow">
+<title>Крикни и прыгни</title>
+
+<style>
+  /* ---------- Внешний вид страницы ---------- */
+
+  /* Убираем отступы и прокрутку: игра занимает весь экран */
+  html, body {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+    background: #f7f7f7;
+    font-family: system-ui, -apple-system, Arial, sans-serif;
+    /* Запрещаем браузеру реагировать на жесты (прокрутка, зум), чтобы они не мешали игре */
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* Любой элемент с классом hidden полностью скрыт.
+     Через JS мы просто добавляем и убираем этот класс. */
+  .hidden { display: none !important; }
+
+  /* Холст, на котором рисуется вся игра */
+  #game {
+    display: block;
+    width: 100vw;
+    height: 100vh;   /* запасной вариант для старых браузеров */
+    height: 100dvh;  /* на телефонах учитывает адресную строку */
+  }
+
+  /* Окно поверх игры: меню, калибровка, результаты.
+     Если содержимое не помещается на экран, его можно прокрутить пальцем. */
+  #overlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    padding: 20px;
+    box-sizing: border-box;
+    overflow-y: auto;
+    touch-action: pan-y;          /* разрешаем прокрутку пальцем только здесь */
+    text-align: center;
+    background: rgba(247, 247, 247, 0.95);
+    color: #535353;
+  }
+
+  /* Колонка с содержимым. margin: auto центрирует её, но если она выше экрана,
+     то верх не обрезается, а окно просто прокручивается. */
+  #panel {
+    margin: auto;
+    width: 100%;
+    max-width: 420px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+  }
+
+  #title { font-size: 30px; font-weight: 700; margin: 0; }
+  #text  { font-size: 17px; line-height: 1.4; margin: 0; white-space: pre-line; }
+
+  button {
+    font-size: 19px;
+    padding: 14px 28px;
+    border: 0;
+    border-radius: 12px;
+    background: #535353;
+    color: #fff;
+    cursor: pointer;
+  }
+  button.secondary { background: #ddd; color: #535353; font-size: 15px; padding: 10px 16px; }
+
+  /* Ряд кнопок, которые переносятся на следующую строку, если не помещаются */
+  .btnRow { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+
+  /* Блок с ползунком чувствительности */
+  #sliderWrap { font-size: 15px; width: 260px; }
+  #sliderWrap input { width: 100%; }
+
+  /* ---------- Игроки ---------- */
+  #playersBlock { display: flex; flex-direction: column; align-items: center; gap: 10px; width: 100%; }
+
+  /* Список игроков: у каждого «карточка» с аватаркой и именем */
+  #playerList { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+  button.chip {
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    padding: 6px 8px; width: 84px;
+    background: transparent; color: #535353; font-size: 13px;
+    border: 3px solid transparent; border-radius: 14px;
+  }
+  button.chip.active { background: #fff; border-color: var(--c); }   /* выбранный игрок обведён его цветом */
+  button.chip canvas { width: 44px; height: 44px; }
+  button.chip span { max-width: 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* Поле для имени. user-select: text нужен, чтобы в него можно было печатать на iPhone */
+  #nameInput {
+    width: 200px; box-sizing: border-box;
+    font-size: 17px; padding: 10px 12px; text-align: center;
+    border: 2px solid #ccc; border-radius: 10px;
+    background: #fff; color: #535353;
+    -webkit-user-select: text; user-select: text;
+  }
+
+  /* ---------- Таблица результатов ---------- */
+  #board { width: 100%; display: flex; flex-direction: column; gap: 4px; font-size: 16px; }
+  #board .brow {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 10px; background: #fff; border-radius: 8px;
+    border-left: 5px solid #ccc; text-align: left;
+  }
+  #board .brow.me { outline: 2px solid #535353; font-weight: 700; }   /* только что сыгравший */
+  #board .rank { width: 30px; }
+  #board .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #board .sc { min-width: 40px; text-align: right; font-weight: 700; }
+  #board .bs { min-width: 70px; text-align: right; font-size: 12px; color: #888; }
+
+  /* ---------- Редактор фото: отдельный слой поверх всего ---------- */
+  #cropLayer {
+    position: fixed; inset: 0; z-index: 10;
+    display: flex; align-items: center; justify-content: center;
+    padding: 20px; box-sizing: border-box; overflow-y: auto;
+    touch-action: pan-y;
+    background: rgba(247, 247, 247, 0.98); color: #535353; text-align: center;
+  }
+  #cropBox { display: flex; flex-direction: column; align-items: center; gap: 12px; max-width: 340px; }
+  #cropBox h2 { margin: 0; font-size: 22px; }
+  #cropBox p { margin: 0; font-size: 15px; line-height: 1.4; }
+  #cropCanvas { width: 280px; height: 280px; border-radius: 12px; touch-action: none; cursor: grab; }
+  #cropZoom { width: 260px; }
+
+  /* Выбранный уровень сложности */
+  .diffBtn.active { background: #535353; color: #fff; }
+
+  /* Пьедестал: холст с анимацией (его рисует функция drawPodium) */
+  #podiumCanvas { width: 320px; max-width: 100%; height: auto; border-radius: 14px; }
+
+  /* Магазин нарядов */
+  button:disabled { opacity: 0.45; cursor: default; }
+  #shopBlock { display: flex; flex-direction: column; align-items: center; gap: 10px; width: 100%; }
+  #shopCanvas { width: 140px; height: 140px; border-radius: 14px; }
+  /* Витрина: наряды крупными картинками, по три в ряд */
+  #shopList { width: 100%; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  button.scard {
+    position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px;
+    padding: 8px 4px; background: #fff; color: #535353; font-size: 17px; font-weight: 700;
+    border: 4px solid transparent; border-radius: 14px;
+  }
+  button.scard.worn { border-color: #2e9e5b; background: #eef9f0; }   /* надето: зелёная рамка */
+  button.scard canvas { width: 72px; height: 72px; }
+  button.scard .price { min-height: 24px; }   /* у купленных цены нет, но место остаётся */
+
+  /* Вывеска магазина в главном меню (рисует функция drawMenuShop) */
+  #menuShop { width: 320px; max-width: 100%; height: auto; border-radius: 14px; cursor: pointer; }
+</style>
+</head>
+
+<body>
+<canvas id="game"></canvas>
+
+<!-- Редактор фото: появляется после выбора снимка, чтобы поставить лицо в круг -->
+<div id="cropLayer" class="hidden">
+  <div id="cropBox">
+    <h2>Поставьте лицо в круг</h2>
+    <p>Двигайте фото пальцем, увеличивайте двумя пальцами или ползунком.</p>
+    <canvas id="cropCanvas" width="560" height="560"></canvas>
+    <input id="cropZoom" type="range" min="0" max="100" value="0">
+    <div class="btnRow">
+      <button id="btnCropOk">Готово</button>
+      <button id="btnCropCancel" class="secondary">Отмена</button>
+    </div>
+  </div>
+</div>
+
+<!-- Окно с меню. Его содержимое меняет JavaScript (функция showOverlay) -->
+<div id="overlay">
+  <div id="panel">
+    <h1 id="title">Крикни и прыгни</h1>
+    <p id="text"></p>
+
+    <!-- Таблица результатов (показывается после игры, если игроков больше одного) -->
+    <!-- Магазин нарядов: предпросмотр героя и список, что можно купить или надеть -->
+    <div id="shopBlock" class="hidden">
+      <canvas id="shopCanvas" width="240" height="240"></canvas>
+      <div id="shopList"></div>
+      <button id="btnShopBack">Назад</button>
+    </div>
+
+    <!-- Пьедестал: показывается, когда в раунде сыграли все игроки -->
+    <canvas id="podiumCanvas" class="hidden" width="640" height="500"></canvas>
+
+    <div id="board" class="hidden"></div>
+
+    <!-- Скрытое поле выбора файла для фото. На телефоне с атрибутом
+         capture="user" оно сразу открывает фронтальную камеру -->
+    <input id="fileInput" type="file" accept="image/*" capture="user" hidden>
+
+    <!-- Блок игроков: список, имя, фото, добавление и удаление -->
+    <div id="playersBlock" class="hidden">
+      <div id="playerList"></div>
+      <input id="nameInput" type="text" maxlength="12" placeholder="Имя игрока" autocomplete="off">
+      <!-- Сложность выбранного игрока -->
+      <div class="btnRow">
+        <button class="secondary diffBtn" data-d="0">🐣 Малыш</button>
+        <button class="secondary diffBtn" data-d="1">🙂 Обычный</button>
+        <button class="secondary diffBtn" data-d="2">🔥 Сложный</button>
+      </div>
+      <div class="btnRow">
+        <button id="btnFace" class="secondary">📷 Фото</button>
+        <button id="btnFaceClear" class="secondary hidden">Убрать фото</button>
+        <button id="btnDelete" class="secondary hidden">Удалить игрока</button>
+      </div>
+      <!-- Магазин нарядов: большая картинка, нажмите на неё, чтобы войти -->
+      <canvas id="menuShop" width="640" height="400"></canvas>
+      <button id="btnAddPlayer" class="secondary">+ Добавить игрока</button>
+    </div>
+
+    <button id="btnStart">Старт</button>
+
+    <!-- Дополнительные кнопки на экране результатов -->
+    <div id="rowBtns" class="btnRow hidden">
+      <button id="btnAgain" class="secondary hidden"></button>
+      <button id="btnRound" class="secondary hidden">Новый раунд</button>
+      <button id="btnShop2" class="secondary">🛍 Магазин</button>
+      <button id="btnPlayers" class="secondary">👥 Игроки</button>
+    </div>
+
+    <button id="btnTap" class="secondary hidden">Играть касанием (без микрофона)</button>
+    <button id="btnCalib" class="secondary hidden">Откалибровать микрофон заново</button>
+
+    <div id="sliderWrap" class="hidden">
+      Порог громкости: <b id="sliderVal"></b><br>
+      <small>меньше — прыгает от тихих звуков, больше — нужно громче</small>
+      <input id="slider" type="range" min="10" max="400" step="1">
+    </div>
+  </div>
+</div>
+
+<script>
+/* =====================================================================
+   НАСТРОЙКИ ИГРЫ
+   Здесь собраны все числа, которые можно менять, чтобы подогнать
+   сложность и «ощущение» игры. Единицы — условные «игровые пиксели»:
+   мир всегда шириной 600 единиц, независимо от размера экрана.
+   ===================================================================== */
+const CONFIG = {
+  gravity:       2200,  // как быстро герой падает вниз (единиц/сек²)
+  jumpSpeed:      780,  // начальная скорость прыжка вверх (больше — выше прыжок)
+  // Скорость и промежутки между препятствиями зависят от сложности: смотрите DIFFS ниже
+  heroX:           80,  // положение героя по горизонтали
+  heroW:           40,  // ширина героя
+  heroH:           50,  // высота героя (с головой-фотографией нужно чуть больше места)
+  calibrationMs: 2000,  // сколько миллисекунд замеряем фоновый шум
+  jumpCooldownMs: 250,  // минимальная пауза между прыжками (мс)
+  maxPlayers:       6   // сколько игроков можно добавить
+};
+
+/* =====================================================================
+   УРОВНИ СЛОЖНОСТИ
+   У каждого игрока свой уровень: так маленький и взрослый могут играть
+   в одном раунде. Что значат числа:
+     speedStart, speedAcc, speedMax — скорость в начале, как быстро растёт, предел;
+     gapMin, gapRange — промежуток между препятствиями (в секундах бега):
+                        от gapMin до gapMin + gapRange;
+     lives — сколько жизней (сердечек) в одном забеге;
+     coins — сколько монет висит над препятствием (малышу достаётся больше всех).
+   ===================================================================== */
+const DIFFS = [
+  { name: 'Малыш',   icon: '🐣', speedStart: 220, speedAcc: 3, speedMax: 380, gapMin: 1.3,  gapRange: 1.1, lives: 5, coins: 3 },
+  { name: 'Обычный', icon: '🙂', speedStart: 280, speedAcc: 5, speedMax: 520, gapMin: 1.0,  gapRange: 1.0, lives: 3, coins: 2 },
+  { name: 'Сложный', icon: '🔥', speedStart: 300, speedAcc: 8, speedMax: 650, gapMin: 0.85, gapRange: 0.9, lives: 2, coins: 1 }
+];
+let dif = DIFFS[1];   // настройки сложности текущего забега
+
+/* =====================================================================
+   ЭЛЕМЕНТЫ СТРАНИЦЫ
+   ===================================================================== */
+const canvas   = document.getElementById('game');
+const ctx      = canvas.getContext('2d');   // «кисть», которой рисуем на холсте
+const overlay  = document.getElementById('overlay');
+const titleEl  = document.getElementById('title');
+const textEl   = document.getElementById('text');
+const boardEl  = document.getElementById('board');
+const btnStart = document.getElementById('btnStart');
+const rowBtns  = document.getElementById('rowBtns');
+const btnAgain = document.getElementById('btnAgain');
+const btnRound = document.getElementById('btnRound');
+const btnPlayers = document.getElementById('btnPlayers');
+const btnCalib = document.getElementById('btnCalib');
+const btnTap   = document.getElementById('btnTap');
+const sliderWrap = document.getElementById('sliderWrap');
+const slider   = document.getElementById('slider');
+const sliderVal = document.getElementById('sliderVal');
+// Элементы блока игроков
+const playersBlock = document.getElementById('playersBlock');
+const playerList   = document.getElementById('playerList');
+const nameInput    = document.getElementById('nameInput');
+const btnFace      = document.getElementById('btnFace');
+const btnFaceClear = document.getElementById('btnFaceClear');
+const btnDelete    = document.getElementById('btnDelete');
+const btnAddPlayer = document.getElementById('btnAddPlayer');
+const fileInput    = document.getElementById('fileInput');
+
+/* =====================================================================
+   РАЗМЕРЫ ХОЛСТА
+   Мы рисуем в «игровых единицах» (ширина мира = 600), а функция resize()
+   вычисляет, во сколько раз их нужно увеличить под текущий экран.
+   ===================================================================== */
+const WORLD_W = 600;   // ширина игрового мира
+let scale = 1;         // во сколько раз увеличиваем мир
+let worldH = 300;      // высота мира в игровых единицах (зависит от экрана)
+let groundY = 200;     // на какой высоте проходит земля
+
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2); // плотность пикселей (для чёткости)
+  canvas.width  = Math.round(window.innerWidth  * dpr);
+  canvas.height = Math.round(window.innerHeight * dpr);
+  scale  = canvas.width / WORLD_W;
+  worldH = canvas.height / scale;
+  groundY = worldH * 0.72;   // земля на 72% высоты экрана
+}
+window.addEventListener('resize', resize);
+resize();
+
+/* =====================================================================
+   МИКРОФОН
+   Идея: браузер даёт нам поток звука. Через AnalyserNode мы каждый кадр
+   получаем «осциллограмму» (массив чисел от -1 до 1) и считаем из неё
+   громкость — среднеквадратичное значение (RMS). Чем громче звук, тем
+   больше число (тихая комната ≈ 0.005–0.02, крик ≈ 0.2 и выше).
+   ===================================================================== */
+let audioCtx = null;      // «звуковой движок» браузера
+let analyser = null;      // узел, который умеет анализировать звук
+let timeBuf  = null;      // сюда складываем данные осциллограммы
+let micEnabled = false;   // true — управляем звуком, false — только касанием
+let modeChosen = false;   // выбрал ли игрок способ управления (микрофон или касание)
+
+// Подключаем микрофон. Вызывать нужно из обработчика клика/касания,
+// иначе браузер (особенно iOS) не даст запустить звук.
+async function setupMic() {
+  // Если микрофон уже подключён раньше — просто «будим» его
+  if (analyser) { audioCtx.resume(); return true; }
+
+  // Создаём звуковой движок сразу, пока действует «разрешение от касания»
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  audioCtx.resume();
+
+  try {
+    // Просим доступ к микрофону. Отключаем «улучшайзеры» браузера:
+    // шумоподавление и автоусиление мешали бы замерять реальную громкость.
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+    });
+    const source = audioCtx.createMediaStreamSource(stream);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 1024;                       // размер «окна» звука (~23 мс)
+    timeBuf = new Float32Array(analyser.fftSize);
+    // Важно: НЕ подключаем analyser к динамикам, иначе будет эхо
+    source.connect(analyser);
+    return true;
+  } catch (err) {
+    // Пользователь отказал, нет микрофона или страница открыта не по HTTPS
+    console.warn('Микрофон недоступен:', err);
+    return false;
+  }
+}
+
+// Возвращает текущую громкость (число от 0 до ~1)
+function readLevel() {
+  if (!analyser) return 0;
+  analyser.getFloatTimeDomainData(timeBuf);
+  let sum = 0;
+  for (let i = 0; i < timeBuf.length; i++) sum += timeBuf[i] * timeBuf[i];
+  return Math.sqrt(sum / timeBuf.length);   // RMS
+}
+
+/* =====================================================================
+   ИГРОКИ
+   Каждый игрок — это объект:
+     name  — имя
+     color — цвет героя (когда нет фото) и рамки
+     face  — фото в виде текста (dataURL) для сохранения в браузере
+     img   — готовая картинка для рисования (создаётся из face)
+     best  — личный рекорд за всё время (сохраняется)
+     last  — результат последней игры в текущем раунде (не сохраняется)
+   Все игроки хранятся в браузере телефона (localStorage) и никуда не отправляются.
+   ===================================================================== */
+const PLAYER_COLORS = ['#535353', '#d9534f', '#3b82c4', '#2e9e5b', '#e08a1e', '#8e5bc4'];
+const FACE_SIZE = 128;    // размер сохраняемого фото (128×128 хватает с запасом)
+
+// Наряды из магазина. slot — куда надевается: head (голова), face (лицо), back (спина).
+// В каждой «ячейке» можно носить один наряд. Рисует их функция drawOutfit.
+const OUTFITS = [
+  { id: 'cap',     name: 'Кепка',             slot: 'head', cost: 15 },
+  { id: 'bow',     name: 'Бант',              slot: 'head', cost: 15 },
+  { id: 'party',   name: 'Колпак',            slot: 'head', cost: 20 },
+  { id: 'glasses', name: 'Очки',              slot: 'face', cost: 25 },
+  { id: 'cape',    name: 'Плащ',              slot: 'back', cost: 30 },
+  { id: 'wizard',  name: 'Шляпа волшебника',  slot: 'head', cost: 35 },
+  { id: 'crown',   name: 'Корона',            slot: 'head', cost: 50 }
+];
+const OUTFIT_BY_ID = {};
+OUTFITS.forEach(it => { OUTFIT_BY_ID[it.id] = it; });
+
+// Проверяет сохранённые данные о нарядах: носить можно только купленное и только в свою ячейку
+function cleanWear(p) {
+  const w = { head: null, face: null, back: null };
+  const owned = Array.isArray(p.owned) ? p.owned : [];
+  if (p.wear && typeof p.wear === 'object') {
+    for (const slot in w) {
+      const it = OUTFIT_BY_ID[p.wear[slot]];
+      if (it && it.slot === slot && owned.includes(it.id)) w[slot] = it.id;
+    }
+  }
+  return w;
+}
+
+let players = [];         // список всех игроков
+let current = 0;          // номер выбранного (играющего сейчас) игрока в списке
+let startIndex = 0;       // кто будет играть после нажатия главной кнопки
+let menuShown = false;    // показан ли сейчас экран выбора игроков
+let faceTarget = null;    // кому сейчас меняем фото
+
+// Имя для показа: если стёрли всё, подставляем «Игрок»
+function displayName(p) { return p.name.trim() || 'Игрок'; }
+
+// Создаёт нового игрока: берёт первый свободный цвет и имя «Игрок N»
+function makePlayer() {
+  const used = players.map(p => p.color);
+  const color = PLAYER_COLORS.find(c => !used.includes(c)) || PLAYER_COLORS[players.length % PLAYER_COLORS.length];
+  let n = 1;
+  while (players.some(p => p.name === 'Игрок ' + n)) n++;
+  return {
+    name: 'Игрок ' + n, color, face: null, img: null, best: 0, last: null, round: null,
+    diff: 1,                                   // сложность: 0 — Малыш, 1 — Обычный, 2 — Сложный
+    coins: 0,                                  // копилка монет
+    owned: [],                                 // купленные наряды (id)
+    wear: { head: null, face: null, back: null }   // что надето сейчас
+  };
+}
+
+// Сохраняем игроков в браузере (без img и last: они не нужны)
+function savePlayers() {
+  try {
+    localStorage.setItem('players', JSON.stringify(
+      players.map(p => ({ name: p.name, color: p.color, face: p.face, best: p.best,
+                          diff: p.diff, coins: p.coins, owned: p.owned, wear: p.wear }))
+    ));
+  } catch (e) {}
+}
+
+// Загружаем игроков при запуске игры
+function loadPlayers() {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem('players')); } catch (e) {}
+
+  if (Array.isArray(saved)) {
+    // Переписываем данные «с нуля», проверяя каждое поле
+    players = saved.filter(p => p && typeof p === 'object').slice(0, CONFIG.maxPlayers).map(p => ({
+      name:  String(p.name || 'Игрок').slice(0, 12),
+      color: PLAYER_COLORS.includes(p.color) ? p.color : PLAYER_COLORS[0],
+      face:  (typeof p.face === 'string' && p.face.startsWith('data:image/')) ? p.face : null,
+      img: null,
+      best: Number(p.best) || 0,
+      last: null,
+      round: null,   // лучший заход в текущем раунде (не сохраняется)
+      diff:  [0, 1, 2].includes(p.diff) ? p.diff : 1,
+      coins: Math.max(0, Math.floor(Number(p.coins) || 0)),
+      owned: Array.isArray(p.owned) ? p.owned.filter(id => OUTFIT_BY_ID[id]) : [],
+      wear:  cleanWear(p)
+    }));
+  }
+
+  if (!players.length) {
+    // Первый запуск: создаём одного игрока и забираем фото и рекорд из прошлой версии игры
+    const p = makePlayer();
+    try {
+      const oldFace = localStorage.getItem('faceImage');
+      if (oldFace && oldFace.startsWith('data:image/')) p.face = oldFace;
+      p.best = Number(localStorage.getItem('bestScore')) || 0;
+    } catch (e) {}
+    players.push(p);
+  }
+
+  // Превращаем сохранённые фото-тексты в картинки
+  players.forEach(p => {
+    if (!p.face) return;
+    const im = new Image();
+    im.onload = () => { p.img = im; renderPlayers(); };
+    im.src = p.face;
+  });
+}
+
+// Рисует круглую аватарку игрока: фото или цветной круг с первой буквой имени
+function drawAvatar(c2d, p, size) {
+  const r = size / 2;
+  c2d.clearRect(0, 0, size, size);
+  c2d.save();
+  c2d.beginPath();
+  c2d.arc(r, r, r, 0, Math.PI * 2);
+  c2d.clip();                                  // рисуем только внутри круга
+  if (p.img) {
+    c2d.drawImage(p.img, 0, 0, size, size);
+  } else {
+    c2d.fillStyle = p.color;
+    c2d.fillRect(0, 0, size, size);
+    c2d.fillStyle = '#fff';
+    c2d.font = 'bold ' + Math.round(size * 0.5) + 'px system-ui, Arial';
+    c2d.textAlign = 'center';
+    c2d.textBaseline = 'middle';
+    c2d.fillText(displayName(p).charAt(0).toUpperCase(), r, r + 1);
+  }
+  c2d.restore();
+}
+
+// Перерисовывает блок игроков: карточки, имя, нужные кнопки
+function renderPlayers() {
+  playerList.innerHTML = '';
+  players.forEach((p, i) => {
+    const chip = document.createElement('button');
+    chip.className = 'chip' + (i === current ? ' active' : '');
+    chip.style.setProperty('--c', p.color);
+
+    const av = document.createElement('canvas');
+    av.width = av.height = 88;                  // рисуем в двойном размере для чёткости
+    drawAvatar(av.getContext('2d'), p, 88);
+
+    const nm = document.createElement('span');
+    nm.textContent = DIFFS[p.diff].icon + ' ' + displayName(p);   // значок сложности и имя (textContent безопасен, даже если в имени есть символы < >)
+
+    chip.append(av, nm);
+    chip.addEventListener('click', () => { current = i; renderPlayers(); });
+    playerList.appendChild(chip);
+  });
+
+  const P = players[current];
+  if (document.activeElement !== nameInput) nameInput.value = P.name;   // не мешаем печатать
+  btnFace.textContent = P.img ? '📷 Другое фото' : '📷 Фото';
+  btnFaceClear.classList.toggle('hidden', !P.img);
+  btnDelete.classList.toggle('hidden', players.length < 2);
+  btnAddPlayer.classList.toggle('hidden', players.length >= CONFIG.maxPlayers);
+  document.querySelectorAll('.diffBtn').forEach(b => b.classList.toggle('active', Number(b.dataset.d) === P.diff));
+  updateStartLabel();
+}
+
+// Выбор сложности для выбранного игрока
+document.querySelectorAll('.diffBtn').forEach(b => b.addEventListener('click', () => {
+  players[current].diff = Number(b.dataset.d);
+  savePlayers();
+  renderPlayers();
+}));
+
+// Подпись на главной кнопке на экране игроков: «Играть: Имя»
+function updateStartLabel() {
+  if (!menuShown) return;
+  startIndex = current;
+  btnStart.textContent = '▶ Играть: ' + displayName(players[current]);
+}
+
+// Печатаем имя — сразу сохраняем и обновляем карточки
+nameInput.addEventListener('input', () => {
+  players[current].name = nameInput.value.slice(0, 12);
+  savePlayers();
+  renderPlayers();
+});
+
+// Добавить игрока
+btnAddPlayer.addEventListener('click', () => {
+  if (players.length >= CONFIG.maxPlayers) return;
+  players.push(makePlayer());
+  current = players.length - 1;     // новый игрок сразу выбран
+  savePlayers();
+  renderPlayers();
+});
+
+// Удалить выбранного игрока (последнего удалить нельзя)
+btnDelete.addEventListener('click', () => {
+  if (players.length < 2) return;
+  if (!confirm('Удалить игрока «' + displayName(players[current]) + '»?')) return;
+  players.splice(current, 1);
+  current = Math.min(current, players.length - 1);
+  savePlayers();
+  renderPlayers();
+});
+
+// Фото: открываем камеру или выбор файла
+btnFace.addEventListener('click', () => { faceTarget = players[current]; fileInput.click(); });
+fileInput.addEventListener('change', () => {
+  const file = fileInput.files[0];
+  if (file && faceTarget) openCropper(file, faceTarget);
+  fileInput.value = '';   // сбрасываем, чтобы можно было выбрать тот же файл ещё раз
+});
+
+/* =====================================================================
+   РЕДАКТОР ФОТО
+   После выбора снимка открывается круглая «рамка». Фото можно двигать
+   пальцем, увеличивать щипком (двумя пальцами), ползунком или колесом
+   мыши. Кнопка «Готово» вырезает то, что внутри круга, и сохраняет
+   как голову героя.
+   ===================================================================== */
+const cropLayer     = document.getElementById('cropLayer');
+const cropCanvas    = document.getElementById('cropCanvas');
+const cropZoom      = document.getElementById('cropZoom');
+const btnCropOk     = document.getElementById('btnCropOk');
+const btnCropCancel = document.getElementById('btnCropCancel');
+const CROP_W = 280;     // размер окошка редактора (в обычных пикселях)
+const CROP_R = 120;     // радиус круга внутри окошка
+let crop = null;        // состояние редактора: фото, масштаб и сдвиг (null — редактор закрыт)
+const cropPointers = new Map();   // сейчас прижатые пальцы
+let pinchDist = 0;                // расстояние между двумя пальцами
+
+// Открываем редактор для выбранного файла-фотографии игрока p
+function openCropper(file, p) {
+  const url = URL.createObjectURL(file);   // временная ссылка на файл
+  const img = new Image();
+  img.onload = () => {
+    // min — наименьший масштаб: фото целиком закрывает круг, пустых краёв нет
+    const min = 2 * CROP_R / Math.min(img.naturalWidth, img.naturalHeight);
+    // s — текущий масштаб, ox и oy — сдвиг фото от центра окошка
+    crop = { img, url, p, min, s: min, ox: 0, oy: 0 };
+    cropZoom.value = 0;
+    cropPointers.clear();
+    cropLayer.classList.remove('hidden');
+    drawCrop();
+  };
+  img.onerror = () => { URL.revokeObjectURL(url); alert('Не удалось открыть это фото'); };
+  img.src = url;
+}
+
+// Закрываем редактор и освобождаем память
+function closeCropper() {
+  if (crop) URL.revokeObjectURL(crop.url);
+  crop = null;
+  cropPointers.clear();
+  cropLayer.classList.add('hidden');
+}
+
+// Не даём сдвинуть фото так, чтобы в круге появилась пустота
+function clampCrop() {
+  const mx = Math.max(0, crop.img.naturalWidth  * crop.s / 2 - CROP_R);
+  const my = Math.max(0, crop.img.naturalHeight * crop.s / 2 - CROP_R);
+  crop.ox = Math.max(-mx, Math.min(mx, crop.ox));
+  crop.oy = Math.max(-my, Math.min(my, crop.oy));
+}
+
+// Меняем масштаб (от «фото закрывает круг» до увеличения в 4 раза)
+function setCropScale(s) {
+  crop.s = Math.max(crop.min, Math.min(crop.min * 4, s));
+  cropZoom.value = Math.round((crop.s / crop.min - 1) / 3 * 100);   // ползунок следует за щипком
+  clampCrop();
+  drawCrop();
+}
+
+// Рисуем окошко редактора: фото, затемнение вокруг круга и рамку круга
+function drawCrop() {
+  const g = cropCanvas.getContext('2d'), W = CROP_W;
+  g.setTransform(2, 0, 0, 2, 0, 0);          // холст в два раза крупнее для чёткости
+  g.fillStyle = '#222';
+  g.fillRect(0, 0, W, W);
+  const iw = crop.img.naturalWidth * crop.s, ih = crop.img.naturalHeight * crop.s;
+  g.drawImage(crop.img, W / 2 + crop.ox - iw / 2, W / 2 + crop.oy - ih / 2, iw, ih);
+  g.fillStyle = 'rgba(0, 0, 0, 0.55)';       // затемняем всё, что вне круга
+  g.beginPath();
+  g.rect(0, 0, W, W);
+  g.arc(W / 2, W / 2, CROP_R, 0, Math.PI * 2);
+  g.fill('evenodd');                         // «дырка» в форме круга
+  g.strokeStyle = '#fff';
+  g.lineWidth = 2;
+  g.beginPath();
+  g.arc(W / 2, W / 2, CROP_R, 0, Math.PI * 2);
+  g.stroke();
+}
+
+// Палец или мышь: один — двигаем фото, два — масштабируем
+cropCanvas.addEventListener('pointerdown', e => {
+  if (!crop) return;
+  cropCanvas.setPointerCapture(e.pointerId);
+  cropPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (cropPointers.size === 2) {
+    const [a, b] = [...cropPointers.values()];
+    pinchDist = Math.hypot(a.x - b.x, a.y - b.y);
+  }
+});
+cropCanvas.addEventListener('pointermove', e => {
+  if (!crop || !cropPointers.has(e.pointerId)) return;
+  const prev = cropPointers.get(e.pointerId);
+  cropPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (cropPointers.size === 1) {
+    crop.ox += e.clientX - prev.x;           // двигаем фото вслед за пальцем
+    crop.oy += e.clientY - prev.y;
+    clampCrop();
+    drawCrop();
+  } else if (cropPointers.size === 2) {
+    const [a, b] = [...cropPointers.values()];
+    const d = Math.hypot(a.x - b.x, a.y - b.y);
+    if (pinchDist > 0) setCropScale(crop.s * d / pinchDist);   // щипок меняет масштаб
+    pinchDist = d;
+  }
+});
+const cropRelease = e => cropPointers.delete(e.pointerId);
+cropCanvas.addEventListener('pointerup', cropRelease);
+cropCanvas.addEventListener('pointercancel', cropRelease);
+
+// Колесо мыши (на компьютере) и ползунок масштаба
+cropCanvas.addEventListener('wheel', e => {
+  if (!crop) return;
+  e.preventDefault();
+  setCropScale(crop.s * (e.deltaY < 0 ? 1.08 : 0.92));
+}, { passive: false });
+cropZoom.addEventListener('input', () => {
+  if (!crop) return;
+  crop.s = crop.min * (1 + cropZoom.value / 100 * 3);
+  clampCrop();
+  drawCrop();
+});
+
+btnCropCancel.addEventListener('click', closeCropper);
+
+// «Готово»: вырезаем то, что внутри круга, и сохраняем игроку
+btnCropOk.addEventListener('click', () => {
+  if (!crop) return;
+  const c = crop, s = c.s;
+  const iw = c.img.naturalWidth, ih = c.img.naturalHeight;
+  // Какой квадрат исходного фото сейчас лежит в круге (в пикселях самого фото)
+  const sx = (iw * s / 2 - CROP_R - c.ox) / s;
+  const sy = (ih * s / 2 - CROP_R - c.oy) / s;
+  const side = 2 * CROP_R / s;
+  const out = document.createElement('canvas');
+  out.width = out.height = FACE_SIZE;
+  out.getContext('2d').drawImage(c.img, sx, sy, side, side, 0, 0, FACE_SIZE, FACE_SIZE);
+  c.p.img = out;
+  c.p.face = out.toDataURL('image/jpeg', 0.85);   // фото в виде текста для хранения
+  savePlayers();
+  renderPlayers();
+  closeCropper();
+});
+
+// Убрать фото: герой снова будет цветным квадратом
+btnFaceClear.addEventListener('click', () => {
+  const p = players[current];
+  p.img = null;
+  p.face = null;
+  savePlayers();
+  renderPlayers();
+});
+
+/* =====================================================================
+   СОСТОЯНИЕ ИГРЫ
+   ===================================================================== */
+// Какой экран сейчас: 'menu' (меню), 'calibrating' (замер шума),
+// 'playing' (идёт игра), 'over' (проигрыш)
+let state = 'menu';
+
+let threshold = 0.08;   // порог громкости: громче этого значения — прыжок
+let level = 0;          // текущая громкость (обновляется каждый кадр)
+
+let hero, obstacles, clouds, speed, score, distSinceSpawn, nextGap, groundScroll, runTime;
+let lives = 3, hurtT = 0;          // жизни в забеге и сколько секунд ещё неуязвим после удара
+let coinList = [], runCoins = 0;   // монеты на трассе и сколько собрано за этот забег
+let armed = true;       // «взведён ли прыжок»: чтобы один долгий звук не давал серию прыжков
+let lastJump = 0;       // время последнего прыжка
+
+// Начинаем новую игру: сбрасываем все значения
+function startGame() {
+  hero = { z: 0, vz: 0 };   // z — высота над землёй, vz — вертикальная скорость
+  obstacles = [];           // список препятствий на экране
+  clouds = [];              // облака для красоты
+  for (let i = 0; i < 4; i++) {
+    clouds.push({ x: Math.random() * WORLD_W, y: 30 + Math.random() * groundY * 0.5, w: 50 + Math.random() * 40 });
+  }
+  dif = DIFFS[players[current].diff];   // настройки сложности выбранного игрока
+  speed = dif.speedStart;
+  lives = dif.lives;        // сколько жизней в этом забеге
+  hurtT = 0;                // сколько секунд ещё неуязвим после удара
+  coinList = [];            // монеты на трассе
+  runCoins = 0;             // сколько монет собрано в этом забеге
+  score = 0;
+  distSinceSpawn = 0;
+  nextGap = speed * 1.6;    // до первого препятствия подольше
+  groundScroll = 0;
+  runTime = 0;
+  biomeIdx = 0;             // каждая игра начинается в пустыне
+  snapBiome();              // сразу ставим цвета пустыни, без плавного перехода
+  bannerT = 2.5;            // на пару секунд показываем название места
+  tod = 0.2;                // каждая игра начинается ясным днём
+  updateTime();
+  resetWeather();
+  buildMarkers();           // расставляем маркеры игроков, уже сыгравших в этом раунде
+  toastT = 0;
+  podiumOn = false;         // пьедестал больше не нужен
+  menuShopOn = false;       // и вывеска магазина тоже
+  armed = true;
+  state = 'playing';
+  overlay.classList.add('hidden');
+}
+
+// Удар о препятствие: отнимаем одну жизнь. Возвращает true, если жизни закончились.
+function takeHit() {
+  lives--;
+  if (lives <= 0) { gameOver(); return true; }
+  hurtT = 1.6;                                    // столько секунд герой мигает и неуязвим
+  toastText = 'Ой! Осталось жизней: ' + lives;
+  toastT = 1.6;
+  return false;
+}
+
+// Игра окончена: записываем результат игроку и показываем итоги
+function gameOver() {
+  state = 'over';
+  const P = players[current];
+  const s = Math.floor(score);
+  P.last = s;                       // результат этой игры
+  P.round = Math.max(P.round || 0, s);   // лучший заход в этом раунде: по нему ставится маркер и считается пьедестал
+  P.coins += runCoins;              // собранные монеты уходят в копилку игрока
+  const isRecord = s > P.best;      // побит ли личный рекорд
+  if (isRecord) P.best = s;
+  savePlayers();
+  showResults(s, isRecord);
+}
+
+/* =====================================================================
+   ПРЫЖОК
+   ===================================================================== */
+function jump() {
+  if (state !== 'playing') return;
+  const now = performance.now();
+  // Прыгаем только с земли и не чаще, чем раз в jumpCooldownMs
+  if (hero.z > 0 || now - lastJump < CONFIG.jumpCooldownMs) return;
+  hero.vz = CONFIG.jumpSpeed;   // даём скорость вверх
+  lastJump = now;
+}
+
+// Прыжок касанием экрана или пробелом/стрелкой вверх (удобно для проверки на компьютере)
+canvas.addEventListener('pointerdown', jump);
+window.addEventListener('keydown', e => {
+  // Если печатаем имя в поле ввода, пробел не должен считаться прыжком
+  if (e.target && e.target.tagName === 'INPUT') return;
+  if (e.code === 'Space' || e.code === 'ArrowUp') { e.preventDefault(); jump(); }
+});
+
+/* =====================================================================
+   ОБНОВЛЕНИЕ ИГРЫ (вызывается каждый кадр)
+   dt — сколько секунд прошло с прошлого кадра. Благодаря ему игра
+   идёт с одинаковой скоростью и на 60 Гц, и на 120 Гц экранах.
+   ===================================================================== */
+function update(dt) {
+  // --- Читаем микрофон и решаем, прыгать ли ---
+  if (micEnabled) {
+    level = readLevel();
+    if (level < threshold * 0.6) armed = true;   // звук затих — снова можно прыгать
+    if (state === 'playing' && armed && level > threshold) {
+      armed = false;   // «разряжаем», пока звук не затихнет
+      jump();
+    }
+  }
+
+  if (state !== 'playing') return;
+
+  runTime += dt;
+
+  // --- Скорость постепенно растёт, игра усложняется ---
+  speed = Math.min(dif.speedMax, speed + dif.speedAcc * dt);
+  score += speed * dt / 20;
+
+  // --- Биом меняется каждые BIOME_LEN очков, цвета меняются плавно ---
+  const bi = Math.floor(score / BIOME_LEN) % BIOMES.length;
+  if (bi !== biomeIdx) {
+    biomeIdx = bi; bannerT = 2.5;
+    // если текущая погода не подходит новому месту, она заканчивается
+    if (wOn && !WEATHER_BY_BIOME[bi].includes(wType)) { wOn = false; wTimer = 4; }
+  }
+  fadeBiome(dt);
+  if (bannerT > 0) bannerT -= dt;
+
+  // --- Время суток, погода и маркеры рекордов ---
+  tod = (0.2 + score / TOD_LEN) % 1;
+  updateTime();
+  updateWeather(dt);
+  updateMarkers(dt);
+  updateCoins(dt);
+
+  // --- Физика героя: гравитация тянет вниз ---
+  hero.vz -= CONFIG.gravity * dt;   // скорость уменьшается
+  hero.z  += hero.vz * dt;          // высота меняется на скорость × время
+  if (hero.z <= 0) { hero.z = 0; hero.vz = 0; }  // приземлились
+
+  // --- Земля и облака «едут» влево ---
+  groundScroll = (groundScroll + speed * dt) % 40;
+  for (const c of clouds) {
+    c.x -= speed * dt * 0.15;                    // облака медленнее — эффект глубины
+    if (c.x + c.w < 0) {                         // ушло за экран — возвращаем справа
+      c.x = WORLD_W + Math.random() * 100;
+      c.y = 30 + Math.random() * groundY * 0.5;
+    }
+  }
+
+  // --- Создаём новые препятствия ---
+  distSinceSpawn += speed * dt;
+  if (distSinceSpawn >= nextGap && !markerNearSpawn()) {
+    distSinceSpawn = 0;
+    // Выбираем случайное существо или предмет из списка текущего биома
+    const kinds = BIOMES[biomeIdx].obs;
+    const type = kinds[Math.floor(Math.random() * kinds.length)];
+    const spec = OBS[type];
+    const ob = {
+      type: type,
+      x: WORLD_W + 20,                 // появляется за правым краем
+      w: rnd(spec.w),                  // ширина и высота берутся из таблицы OBS
+      h: rnd(spec.h),
+      lift: spec.lift || 0,            // на сколько приподнято над землёй (у летающих)
+      ph: Math.random() * 6            // сдвиг анимации, чтобы все не бежали синхронно
+    };
+    obstacles.push(ob);
+    spawnCoins(ob);                    // иногда над препятствием висят монеты
+    // Расстояние до следующего препятствия считаем «во времени пути»,
+    // чтобы при высокой скорости игра оставалась проходимой
+    nextGap = speed * (dif.gapMin + Math.random() * dif.gapRange);
+  }
+
+  // --- Двигаем препятствия и проверяем столкновение ---
+  // Прямоугольник героя (чуть уменьшен, чтобы игра была «прощающей»)
+  const hx = CONFIG.heroX + 5;
+  const hw = CONFIG.heroW - 10;
+  const hBottom = groundY - hero.z - 3;
+  const hTop    = groundY - hero.z - CONFIG.heroH + 4;
+
+  if (hurtT > 0) hurtT -= dt;                      // после удара герой на время неуязвим
+  for (const o of obstacles) {
+    o.x -= speed * dt;
+    // «Коробка» препятствия чуть меньше рисунка (хвосты и уши не считаются)
+    const ox = o.x + o.w * 0.12, ow = o.w * 0.76;
+    const oBottom = groundY - o.lift;              // низ (у летающих выше земли)
+    const oTop = oBottom - o.h + o.h * 0.08;
+    // Пересечение двух прямоугольников: пересекаются и по горизонтали, и по вертикали
+    if (hurtT <= 0 && !o.hit && hx < ox + ow && hx + hw > ox && hBottom > oTop && hTop < oBottom) {
+      o.hit = true;                                // это препятствие второй раз не засчитываем
+      if (takeHit()) return;                       // жизни кончились: игра окончена
+    }
+  }
+  // Врезались в маркер другого игрока? Он после удара становится «призраком»
+  const mh = (hurtT <= 0) ? markerHit(hx, hw, hTop, hBottom) : null;
+  if (mh) { mh.solid = false; if (takeHit()) return; }
+  // Удаляем препятствия, ушедшие за левый край
+  obstacles = obstacles.filter(o => o.x + o.w > -10);
+}
+
+/* =====================================================================
+   ОТРИСОВКА (вызывается каждый кадр после update)
+   ===================================================================== */
+/* =====================================================================
+   БИОМЫ
+   Каждый биом задаёт цвета (небо, земля, «чернила» для рисунков, облака)
+   и список obs: кто может выбежать навстречу герою в этом месте.
+   Чтобы добавить новое место, скопируйте любую строку и поменяйте её.
+   ===================================================================== */
+const BIOMES = [
+  { name: 'Пустыня',          sky: '#f7e6c4', ground: '#e3c88f', ink: '#6b4f2a', cloud: '#fff3d6', obs: ['cactus', 'rock', 'scorpion', 'raptor', 'bird'] },
+  { name: 'Лес',              sky: '#d6ecd2', ground: '#9bbd80', ink: '#2f4a2a', cloud: '#f0faee', obs: ['stump', 'fern', 'wolf', 'bear', 'bird'] },
+  { name: 'Снежные горы',     sky: '#e1eef9', ground: '#fafcfe', ink: '#3d5a73', cloud: '#ffffff', obs: ['ice', 'penguin', 'wolf', 'mammoth'] },
+  { name: 'Эпоха динозавров', sky: '#f3d9c2', ground: '#b9a56c', ink: '#4a3a22', cloud: '#fbe9d8', obs: ['fern', 'raptor', 'trex', 'ptero', 'rock'] }
+];
+const BIOME_LEN = 400;   // через сколько очков меняется место
+
+// Таблица препятствий: w и h — «от и до» (размер каждый раз случайный),
+// lift — на сколько приподнято над землёй (для летающих; надо перепрыгнуть)
+const OBS = {
+  cactus:   { w: [18, 32], h: [34, 60] },
+  rock:     { w: [26, 40], h: [20, 30] },
+  stump:    { w: [22, 30], h: [26, 36] },
+  fern:     { w: [26, 36], h: [26, 40] },
+  ice:      { w: [24, 34], h: [30, 46] },
+  scorpion: { w: [34, 34], h: [22, 22] },
+  penguin:  { w: [26, 26], h: [38, 38] },
+  wolf:     { w: [50, 50], h: [34, 34] },
+  bear:     { w: [56, 56], h: [50, 50] },
+  mammoth:  { w: [66, 66], h: [58, 58] },
+  raptor:   { w: [44, 44], h: [48, 48] },
+  trex:     { w: [62, 62], h: [60, 60] },
+  bird:     { w: [38, 38], h: [22, 22], lift: 30 },
+  ptero:    { w: [48, 48], h: [24, 24], lift: 32 }
+};
+function rnd(r) { return r[0] + Math.random() * (r[1] - r[0]); }   // случайное число между r[0] и r[1]
+
+// Текущие (плавно меняющиеся) цвета в виде [красный, зелёный, синий]
+function hexRgb(h) { return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)]; }
+function rgb(c) { return 'rgb(' + Math.round(c[0]) + ',' + Math.round(c[1]) + ',' + Math.round(c[2]) + ')'; }
+const cur = { sky: [0, 0, 0], ground: [0, 0, 0], ink: [0, 0, 0], cloud: [0, 0, 0] };
+let biomeIdx = 0;   // номер текущего биома
+let bannerT = 0;    // сколько секунд ещё показывать название места
+
+// Мгновенно ставит цвета текущего биома
+function snapBiome() {
+  const b = BIOMES[biomeIdx];
+  for (const k in cur) cur[k] = hexRgb(b[k]);
+}
+// Плавно сдвигает цвета к цветам текущего биома (вызывается каждый кадр)
+function fadeBiome(dt) {
+  const b = BIOMES[biomeIdx], k = Math.min(1, dt * 1.2);
+  for (const key in cur) {
+    const t = hexRgb(b[key]);
+    for (let i = 0; i < 3; i++) cur[key][i] += (t[i] - cur[key][i]) * k;
+  }
+}
+snapBiome();
+
+let COLOR = '#535353';   // цвет «чернил» (обновляется каждый кадр из текущего биома)
+
+/* =====================================================================
+   ВРЕМЯ СУТОК
+   Время зависит от очков: за TOD_LEN очков проходят полные сутки.
+   От него считаются dark (насколько темно) и warm (закатное небо).
+   Дальше в draw цвета неба, земли и «чернил» смешиваются с ночными.
+   ===================================================================== */
+const TOD_LEN = 900;    // за сколько очков проходят сутки
+let tod = 0.2;          // время суток от 0 до 1: 0.25 — полдень, 0.75 — полночь
+let dark = 0;           // 0 — день, 1 — глубокая ночь
+let warm = 0;           // 1 — закат или рассвет
+let nightInk = false;   // ночью герою нужна светлая «подсветка»
+const NIGHT = { sky: [13, 20, 51], ground: [30, 36, 56], ink: [222, 228, 242], cloud: [42, 52, 88] };
+const view = { sky: [0, 0, 0], ground: [0, 0, 0], ink: [0, 0, 0], cloud: [0, 0, 0] };   // цвета, которые реально рисуем
+const stars = [];
+for (let i = 0; i < 50; i++) stars.push({ x: Math.random() * WORLD_W, y: Math.random() * 0.6, ph: Math.random() * 6 });
+
+// Смешивает два цвета: t = 0 — первый, t = 1 — второй
+function mixRgb(a, b, t) { return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]; }
+
+function updateTime() {
+  dark = 0.5 - 0.5 * Math.cos(2 * Math.PI * (tod - 0.25));   // плавно: 0 в полдень, 1 в полночь
+  warm = Math.max(0, 1 - Math.abs(dark - 0.5) * 3);          // пик на закате и рассвете
+}
+
+// Считает итоговые цвета кадра: цвета биома + закат + дождь + ночь
+function computeView() {
+  const rain = (wType === 'rain') ? wInt : 0;
+  let sky = mixRgb(cur.sky, [255, 150, 90], warm * 0.35);
+  sky = mixRgb(sky, [125, 135, 150], rain * 0.35);
+  view.sky = mixRgb(sky, NIGHT.sky, dark * 0.95);
+  view.ground = mixRgb(cur.ground, NIGHT.ground, dark * 0.9);
+  view.cloud = mixRgb(cur.cloud, NIGHT.cloud, dark);
+  // Цвет рисунков выбираем по яркости неба: на тёмном небе рисунки светлые
+  const L = 0.3 * view.sky[0] + 0.59 * view.sky[1] + 0.11 * view.sky[2];
+  const inkT = Math.max(0, Math.min(1, (135 - L) / 60));
+  view.ink = mixRgb(cur.ink, NIGHT.ink, inkT);
+  nightInk = inkT > 0.3;
+}
+
+/* =====================================================================
+   ПОГОДА
+   Время от времени начинается дождь, снег или песчаная буря (зависит от
+   места). Погода плавно набирает силу (wInt от 0 до 1) и так же стихает.
+   Капли и снежинки — это частицы в списке parts.
+   ===================================================================== */
+const WEATHER_BY_BIOME = [['dust', null, null], ['rain', null], ['snow', 'snow', null], ['rain', 'dust', null]];   // null — «без погоды»
+let wType = null;        // 'rain' | 'snow' | 'dust' (какая погода сейчас или была только что)
+let wOn = false;         // идёт ли погода
+let wInt = 0;            // сила погоды от 0 до 1
+let wTimer = 8;          // через сколько секунд погода сменится
+let wAcc = 0;            // «накопитель» для появления частиц
+let parts = [];          // капли, снежинки, песчинки
+
+function resetWeather() { wType = null; wOn = false; wInt = 0; wTimer = 8; wAcc = 0; parts = []; }
+
+function updateWeather(dt) {
+  wTimer -= dt;
+  if (wTimer <= 0) {
+    if (wOn) { wOn = false; wTimer = 6 + Math.random() * 8; }        // погода заканчивается
+    else {
+      const list = WEATHER_BY_BIOME[biomeIdx];
+      const pick = list[Math.floor(Math.random() * list.length)];    // случайный пункт из списка места
+      if (pick) { wType = pick; wOn = true; wTimer = 10 + Math.random() * 10; parts = []; }
+      else wTimer = 5 + Math.random() * 5;
+    }
+  }
+  wInt += ((wOn ? 1 : 0) - wInt) * Math.min(1, dt * 0.8);   // плавно к 1 или к 0
+  if (!wOn && wInt < 0.03) wInt = 0;
+
+  // Новые частицы: чем сильнее погода, тем их больше
+  if (wType && wInt > 0.05 && parts.length < 160) {
+    wAcc += { rain: 90, snow: 40, dust: 35 }[wType] * wInt * dt;
+    while (wAcc >= 1) {
+      wAcc -= 1;
+      if (wType === 'dust') parts.push({ x: WORLD_W + 10, y: Math.random() * groundY, vx: -(speed + 250 + Math.random() * 150), vy: 0, ph: 0, end: 1e9 });
+      else if (wType === 'rain') parts.push({ x: Math.random() * (WORLD_W + 200), y: -10, vx: -140 - speed * 0.2, vy: 560 + Math.random() * 200, ph: 0, end: groundY + Math.random() * 50 });
+      else parts.push({ x: Math.random() * (WORLD_W + 100), y: -10, vx: -20 - speed * 0.1, vy: 40 + Math.random() * 50, ph: Math.random() * 6, end: Math.min(worldH, groundY + 20 + Math.random() * 60) });
+    }
+  }
+  for (const p of parts) {
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    if (wType === 'snow') p.x += Math.sin(p.y * 0.05 + p.ph) * 20 * dt;   // снежинки покачиваются
+  }
+  parts = parts.filter(p => p.x > -30 && p.y < p.end);
+}
+
+function drawWeather() {
+  if (!wType || wInt < 0.02) return;
+  if (wType === 'dust') {                                    // песчаная буря слегка желтит весь экран
+    ctx.fillStyle = 'rgba(200, 150, 80, ' + (0.18 * wInt) + ')';
+    ctx.fillRect(0, 0, WORLD_W, worldH);
+    ctx.fillStyle = 'rgba(214, 170, 100, 0.6)';
+    for (const p of parts) ctx.fillRect(p.x, p.y, 16, 2);
+  } else if (wType === 'rain') {
+    ctx.strokeStyle = 'rgba(130, 170, 225, 0.75)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (const p of parts) { ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + p.vx * 0.02, p.y + p.vy * 0.02); }
+    ctx.stroke();
+  } else {
+    ctx.fillStyle = nightInk ? '#ffffff' : '#a9c8e4';
+    for (const p of parts) ctx.fillRect(p.x, p.y, 3, 3);
+  }
+}
+
+/* =====================================================================
+   МАРКЕРЫ РЕКОРДОВ
+   Каждый, кто уже сыграл в этом раунде, «остаётся стоять» на дорожке там,
+   где закончился его лучший заход. Следующим игрокам нужно перепрыгнуть
+   его, когда они добегут до этого места. Свой собственный маркер
+   полупрозрачный и не мешает: это подсказка, где надо побить свой рекорд.
+   Чтобы игра оставалась проходимой, маркеры ближе MARK_GAP очков друг к
+   другу тоже становятся полупрозрачными (через них можно пробежать).
+   ===================================================================== */
+const MARK_MIN = 25;    // маркеры у самого старта не ставим (очков)
+const MARK_GAP = 32;    // минимум очков между «твёрдыми» маркерами
+let markers = [];
+let toastT = 0;         // сколько секунд ещё показывать сообщение
+let toastText = '';
+
+function buildMarkers() {
+  markers = [];
+  const list = players.filter(p => p.round != null && p.round >= MARK_MIN).sort((a, b) => a.round - b.round);
+  let lastSolid = -1e9;
+  for (const p of list) {
+    const own = (p === players[current]);
+    const solid = !own && (p.round - lastSolid >= MARK_GAP);
+    if (solid) lastSolid = p.round;
+    markers.push({ p, at: p.round, own, solid, passed: false });
+  }
+}
+
+// Где сейчас левый край маркера. Очки умножаем на 20, потому что
+// score растёт на «пройденный путь / 20»: так маркер едет вместе с миром.
+function markerX(m) { return CONFIG.heroX + 2 + 20 * (m.at - score); }
+
+// Не создаём обычное препятствие рядом с маркером, чтобы не было непроходимых мест
+function markerNearSpawn() {
+  const need = speed * (dif.gapMin + 0.05), sx = WORLD_W + 20;
+  return markers.some(m => m.solid && !m.passed && Math.abs(markerX(m) - sx) < need);
+}
+
+function updateMarkers(dt) {
+  for (const m of markers) {
+    if (!m.passed && markerX(m) + 36 < CONFIG.heroX + 5) {   // герой уже позади маркера
+      m.passed = true;
+      if (m.solid) { toastText = 'Перепрыгнул: ' + displayName(m.p) + '! 🎉'; toastT = 2.2; }
+      else if (m.own) { toastText = 'Рекорд раунда побит! 🔥'; toastT = 2.2; }
+    }
+  }
+  if (toastT > 0) toastT -= dt;
+}
+
+// Столкнулся ли герой с «твёрдым» маркером
+function markerHit(hx, hw, hTop, hBottom) {
+  for (const m of markers) {
+    if (!m.solid || m.passed) continue;
+    const x = markerX(m) + 5, w = 26;
+    if (hx < x + w && hx + hw > x && hBottom > groundY - 46 && hTop < groundY) return m;
+  }
+  return null;
+}
+
+// Рисуем маркеры: фигурка игрока (с фото) и табличка с именем и очками
+function drawMarkers() {
+  for (const m of markers) {
+    const x = markerX(m);
+    if (x > WORLD_W + 30 || x < -60) continue;
+    const p = m.p, cx = x + 18, bottom = groundY;
+    ctx.save();
+    ctx.globalAlpha = m.solid ? 1 : 0.4;                // «призраки» полупрозрачные
+    ctx.fillStyle = p.color;
+    ctx.fillRect(cx - 9, bottom - 12, 7, 12);           // ноги
+    ctx.fillRect(cx + 2, bottom - 12, 7, 12);
+    ctx.fillRect(cx - 11, bottom - 30, 22, 20);         // туловище
+    ctx.fillRect(cx - 15, bottom - 29, 4, 14);          // руки опущены
+    ctx.fillRect(cx + 11, bottom - 29, 4, 14);
+    // голова: фото в круге или цветной круг с буквой
+    ctx.save();
+    ctx.beginPath(); ctx.arc(cx, bottom - 41, 12, 0, Math.PI * 2); ctx.clip();
+    if (p.img) ctx.drawImage(p.img, cx - 12, bottom - 53, 24, 24);
+    else {
+      ctx.fillRect(cx - 12, bottom - 53, 24, 24);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 14px system-ui, Arial';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(displayName(p).charAt(0).toUpperCase(), cx, bottom - 40);
+    }
+    ctx.restore();
+    // табличка с именем и рекордом
+    ctx.font = 'bold 12px system-ui, Arial';
+    const label = displayName(p) + ' ' + m.at;
+    const tw = ctx.measureText(label).width + 10;
+    ctx.fillStyle = p.color;
+    ctx.fillRect(cx - tw / 2, bottom - 76, tw, 16);
+    ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(label, cx, bottom - 68);
+    ctx.restore();
+  }
+}
+
+// Рисует одно препятствие. Все фигуры собраны из прямоугольников.
+// f(a, b, c, d) рисует прямоугольник в долях размера препятствия:
+// a, b — отступ слева и сверху, c, d — ширина и высота (0..1).
+// Существа смотрят влево, ведь они бегут навстречу герою.
+function drawObstacle(o, t) {
+  const x = o.x, w = o.w, h = o.h;
+  const y = groundY - o.lift - h;
+  const f = (a, b, c, d) => ctx.fillRect(x + a * w, y + b * h, c * w, d * h);
+  const step = Math.floor(t * 8 + o.ph) % 2;   // кадр анимации: 0 или 1
+  ctx.fillStyle = COLOR;
+
+  switch (o.type) {
+    case 'cactus':
+      f(0.3, 0, 0.4, 1);                       // ствол
+      f(0, 0.35, 0.3, 0.12); f(0, 0.15, 0.18, 0.3);        // левая ветка
+      f(0.7, 0.45, 0.3, 0.12); f(0.82, 0.25, 0.18, 0.32);  // правая ветка
+      break;
+    case 'rock':
+      f(0, 0.45, 1, 0.55); f(0.12, 0.15, 0.6, 0.35); f(0.4, 0, 0.3, 0.2);
+      break;
+    case 'stump':
+      f(0.1, 0.1, 0.8, 0.9);
+      ctx.fillStyle = '#e6d3a8'; f(0.1, 0, 0.8, 0.2);      // светлый спил сверху
+      break;
+    case 'fern':
+      f(0.45, 0.35, 0.1, 0.65);                            // стебель
+      f(0.05, 0.45, 0.4, 0.12); f(0.55, 0.3, 0.4, 0.12);   // листья
+      f(0.15, 0.2, 0.3, 0.12); f(0.5, 0.05, 0.35, 0.12);
+      break;
+    case 'ice':
+      ctx.beginPath();                                     // ледяная глыба с зубцами
+      ctx.moveTo(x, y + h); ctx.lineTo(x + w * 0.25, y + h * 0.35); ctx.lineTo(x + w * 0.45, y);
+      ctx.lineTo(x + w * 0.65, y + h * 0.3); ctx.lineTo(x + w * 0.82, y + h * 0.12); ctx.lineTo(x + w, y + h);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#ffffff'; f(0.4, 0.15, 0.1, 0.3);   // блик
+      break;
+    case 'scorpion':
+      f(0.2, 0.55, 0.55, 0.35); f(0, 0.45, 0.22, 0.2);     // тело и клешня
+      f(0.7, 0.35, 0.15, 0.3); f(0.5, 0.1, 0.35, 0.15); f(0.45, 0.1, 0.12, 0.3);   // хвост с жалом
+      f(0.25, 0.9, 0.08, 0.1); f(0.5, 0.9, 0.08, 0.1); f(0.7, 0.9, 0.08, 0.1);     // ножки
+      break;
+    case 'penguin':
+      f(0.1, 0, 0.8, 0.85);                                // тело
+      ctx.fillStyle = '#ffffff'; f(0.3, 0.3, 0.4, 0.5);    // белое брюшко
+      ctx.fillStyle = '#e08a1e'; f(0, 0.12, 0.15, 0.1);    // клюв
+      f(0.1, 0.88, 0.3, 0.12); f(0.55, 0.88, 0.3, 0.12);   // лапы
+      break;
+    case 'wolf': case 'bear': case 'mammoth': {
+      // Четвероногие: параметры [верх тела, высота тела, ширина головы, толщина ног]
+      const P = { wolf: [0.2, 0.45, 0.28, 0.1], bear: [0.1, 0.55, 0.26, 0.16], mammoth: [0.05, 0.6, 0.3, 0.15] }[o.type];
+      const by = P[0], bh = P[1], legTop = by + bh;
+      const legA = step ? 0 : 0.08, legB = step ? 0.08 : 0;   // ноги по очереди «поднимаются»
+      f(0.2, by, 0.72, bh);                      // туловище
+      f(0, by - 0.05, P[2], bh * 0.75);          // голова
+      f(0.24, legTop, P[3], 1 - legTop - legA);  // передняя нога
+      f(0.7, legTop, P[3], 1 - legTop - legB);   // задняя нога
+      f(0.92, by, 0.08, 0.2);                    // хвост
+      if (o.type === 'wolf') { f(0.03, by - 0.17, 0.07, 0.13); f(0.17, by - 0.17, 0.07, 0.13); }   // уши
+      if (o.type === 'bear') { f(0.02, by - 0.1, 0.08, 0.07); f(0.17, by - 0.1, 0.08, 0.07); }
+      if (o.type === 'mammoth') {
+        f(0, by + 0.25, 0.1, 0.55);              // хобот
+        ctx.fillStyle = '#ffffff'; f(0.1, by + 0.45, 0.16, 0.07);   // бивень
+      }
+      break;
+    }
+    case 'raptor': case 'trex': {
+      const big = o.type === 'trex';
+      f(0, 0.05, big ? 0.4 : 0.3, big ? 0.3 : 0.22);       // голова
+      if (!big) f(0.2, 0.15, 0.15, 0.25);                  // шея
+      f(0.25, 0.3, 0.5, 0.4);                              // тело
+      f(0.7, 0.4, 0.3, 0.16);                              // хвост
+      f(0.36, 0.7, 0.14, 0.3 - (step ? 0.08 : 0));         // ноги бегут по очереди
+      f(0.55, 0.7, 0.14, 0.3 - (step ? 0 : 0.08));
+      if (big) f(0.26, 0.45, 0.1, 0.07);                   // маленькая лапка
+      ctx.fillStyle = '#ffffff'; f(big ? 0.22 : 0.15, 0.1, 0.06, 0.06);   // глаз
+      break;
+    }
+    case 'bird': case 'ptero': {
+      f(0.3, 0.4, 0.45, 0.28); f(0, 0.38, 0.3, 0.18);      // тело и голова
+      f(-0.1, 0.45, 0.12, 0.07); f(0.75, 0.45, 0.25, 0.1); // клюв и хвост
+      f(0.35, step ? 0 : 0.55, 0.4, 0.45);                 // крыло: вверх или вниз
+      if (o.type === 'ptero') f(0, 0.2, 0.14, 0.2);        // гребень
+      break;
+    }
+  }
+}
+
+/* =====================================================================
+   МОНЕТЫ И СЕРДЕЧКИ
+   Над препятствиями иногда висят монеты: пролетая над препятствием, герой
+   их собирает. Сколько монет — зависит от сложности игрока (dif.coins:
+   3 у малыша, 2 у обычного, 1 у сложного). Монеты, собранные за забег,
+   попадают в копилку игрока и тратятся в магазине.
+   ===================================================================== */
+function spawnCoins(ob) {
+  if (Math.random() > 0.75) return;                // монеты бывают не у каждого препятствия
+  const n = dif.coins;                             // сколько монет над этим препятствием
+  const mid = ob.x + ob.w / 2;
+  const top = ob.lift + ob.h;                      // высота верха препятствия над землёй
+  for (let k = 0; k < n; k++) {
+    const off = k - (n - 1) / 2;                   // -1, 0, 1 для трёх; ±0.5 для двух; 0 для одной
+    // дуга: средняя монета выше крайних. h — высота центра монеты над землёй
+    // (примерно на высоте обычного прыжка, но всегда выше самого препятствия)
+    coinList.push({ x: mid + off * 34, h: Math.max(top + 40, 92) + (Math.abs(off) < 0.1 ? 14 : 7), got: false, ph: Math.random() * 6 });
+  }
+}
+
+function updateCoins(dt) {
+  const px = CONFIG.heroX + CONFIG.heroW / 2;      // центр героя по горизонтали
+  const py = hero.z + 25;                          // центр героя по высоте над землёй
+  for (const c of coinList) {
+    c.x -= speed * dt;
+    if (!c.got && Math.abs(c.x - px) < 32 && Math.abs(c.h - py) < 44) { c.got = true; runCoins++; }
+  }
+  coinList = coinList.filter(c => !c.got && c.x > -20);
+}
+
+// Монета: sx — «поворот» (от тонкой до круглой), от него монета выглядит вращающейся
+function drawCoinShape(g, x, y, r, sx) {
+  g.save();
+  g.translate(x, y);
+  g.scale(Math.max(0.15, sx), 1);
+  g.fillStyle = '#f2c14e';
+  g.beginPath(); g.arc(0, 0, r, 0, Math.PI * 2); g.fill();
+  g.strokeStyle = '#b8860b'; g.lineWidth = 1.5; g.stroke();
+  g.fillStyle = '#fbe39a';
+  g.fillRect(-r * 0.15, -r * 0.5, r * 0.3, r);     // блик
+  g.restore();
+}
+
+function drawCoins() {
+  for (const c of coinList) {
+    if (c.got) continue;
+    drawCoinShape(ctx, c.x, groundY - c.h, 9, 0.25 + 0.75 * Math.abs(Math.cos(runTime * 4 + c.ph)));
+  }
+}
+
+// Сердечко шириной и высотой s: cx — центр по горизонтали, top — верхняя точка
+function drawHeart(g, cx, top, s, color) {
+  g.fillStyle = color;
+  g.beginPath();
+  g.moveTo(cx, top + s * 0.3);
+  g.bezierCurveTo(cx, top, cx - s * 0.5, top, cx - s * 0.5, top + s * 0.3);
+  g.bezierCurveTo(cx - s * 0.5, top + s * 0.6, cx, top + s * 0.8, cx, top + s);
+  g.bezierCurveTo(cx, top + s * 0.8, cx + s * 0.5, top + s * 0.6, cx + s * 0.5, top + s * 0.3);
+  g.bezierCurveTo(cx + s * 0.5, top, cx, top, cx, top + s * 0.3);
+  g.fill();
+}
+
+// Рисует героя игрока: тело, ножки и голову (фото в круге или квадратный герой с глазом).
+// g — «кисть» (холст игры или холст пьедестала), hx, hy — левый верхний угол героя,
+// step — кадр бега (0 или 1), bob — на сколько голова «подпрыгивает».
+function drawBody(g, P, hx, hy, step, bob) {
+  g.fillStyle = P.color;
+
+  if (P.img) {
+    // --- Вариант с фотографией: маленькое тело, ножки и голова-фото сверху ---
+    g.fillRect(hx + 9, hy + 32, 22, 8);                                          // туловище
+    g.fillRect(hx + 9,  hy + CONFIG.heroH - 10, 8, step ? 10 : 4);               // левая ножка
+    g.fillRect(hx + 23, hy + CONFIG.heroH - 10, 8, step ? 4 : 10);               // правая ножка
+
+    const r  = 18;                      // радиус головы
+    const cx = hx + CONFIG.heroW / 2;   // центр головы по горизонтали
+    const cy = hy + r - bob;            // центр головы по вертикали
+
+    g.save();
+    g.beginPath();
+    g.arc(cx, cy, r, 0, Math.PI * 2);   // круг...
+    g.clip();                            // ...внутри которого разрешено рисовать
+    g.drawImage(P.img, cx - r, cy - r, r * 2, r * 2);   // фото обрезается кругом
+    g.restore();
+
+    g.lineWidth = 2;                     // рамка вокруг головы цвета игрока
+    g.strokeStyle = P.color;
+    g.beginPath();
+    g.arc(cx, cy, r, 0, Math.PI * 2);
+    g.stroke();
+  } else {
+    // --- Вариант по умолчанию: квадратный герой с глазом ---
+    g.fillRect(hx, hy, CONFIG.heroW, CONFIG.heroH - 10);                         // тело
+    g.fillStyle = '#f7f7f7';
+    g.fillRect(hx + CONFIG.heroW - 16, hy + 8, 8, 8);                            // глаз
+    g.fillStyle = P.color;
+    g.fillRect(hx + 6,  hy + CONFIG.heroH - 10, 10, step ? 10 : 4);              // левая ножка
+    g.fillRect(hx + 24, hy + CONFIG.heroH - 10, 10, step ? 4 : 10);              // правая ножка
+  }
+}
+
+// Рисует наряды игрока (список OUTFITS). layer: 'back' — то, что за спиной (плащ),
+// 'front' — очки и головные уборы поверх героя. Все фигуры собраны из простых форм.
+function drawOutfit(g, P, hx, hy, step, bob, layer) {
+  const w = P.wear || {};
+  const photo = !!P.img;
+  const cx = hx + CONFIG.heroW / 2;        // середина героя по горизонтали
+  const ty = photo ? hy - bob : hy;        // верх головы (у квадратного героя — верх тела)
+  const hw = photo ? 18 : 20;              // половина ширины головы
+
+  if (layer === 'back') {
+    if (w.back === 'cape') {
+      g.fillStyle = '#c0392b';
+      g.beginPath();
+      const wave = step * 3;               // плащ трепещет на бегу
+      if (photo) { g.moveTo(hx + 11, hy + 32); g.lineTo(hx - 6, hy + 46 + wave); g.lineTo(hx + 14, hy + 42); }
+      else       { g.moveTo(hx + 4, hy + 6);   g.lineTo(hx - 12, hy + 38 + wave); g.lineTo(hx + 8, hy + 34); }
+      g.closePath();
+      g.fill();
+    }
+    return;
+  }
+
+  if (w.face === 'glasses') {
+    const fx = photo ? cx : hx + 26;               // где у героя глаза
+    const fy = photo ? hy + 18 - bob : hy + 12;
+    g.fillStyle = 'rgba(255, 255, 255, 0.55)';     // стёкла
+    g.fillRect(fx - 11, fy - 4, 9, 8);
+    g.fillRect(fx + 2, fy - 4, 9, 8);
+    g.strokeStyle = '#222';                        // оправа и перемычка
+    g.lineWidth = 2;
+    g.strokeRect(fx - 11, fy - 4, 9, 8);
+    g.strokeRect(fx + 2, fy - 4, 9, 8);
+    g.beginPath(); g.moveTo(fx - 2, fy - 1); g.lineTo(fx + 2, fy - 1); g.stroke();
+  }
+
+  switch (w.head) {
+    case 'cap':                                    // кепка с козырьком вперёд
+      g.fillStyle = '#d9534f';
+      g.beginPath(); g.arc(cx, ty + 5, 14, Math.PI, 0); g.fill();
+      g.fillRect(cx + 2, ty + 3, 20, 4);
+      break;
+    case 'bow':                                    // розовый бант с узелком
+      g.fillStyle = '#ff7fa8';
+      g.beginPath();
+      g.moveTo(cx + 4, ty + 1); g.lineTo(cx - 8, ty - 9); g.lineTo(cx - 8, ty + 9);
+      g.moveTo(cx + 4, ty + 1); g.lineTo(cx + 16, ty - 9); g.lineTo(cx + 16, ty + 9);
+      g.fill();
+      g.fillStyle = '#e0457a';
+      g.beginPath(); g.arc(cx + 4, ty + 1, 3.5, 0, Math.PI * 2); g.fill();
+      break;
+    case 'party':                                  // праздничный колпак с помпоном
+      g.fillStyle = '#e08a1e';
+      g.beginPath(); g.moveTo(cx - 11, ty + 4); g.lineTo(cx + 11, ty + 4); g.lineTo(cx, ty - 22); g.closePath(); g.fill();
+      g.fillStyle = '#fff';
+      g.fillRect(cx - 5, ty - 6, 3, 3); g.fillRect(cx + 2, ty - 13, 3, 3); g.fillRect(cx - 2, ty - 1, 3, 3);
+      g.fillStyle = '#f2c14e';
+      g.beginPath(); g.arc(cx, ty - 22, 3.5, 0, Math.PI * 2); g.fill();
+      break;
+    case 'wizard':                                 // шляпа волшебника с кривым кончиком и звездой
+      g.fillStyle = '#34449e';
+      g.fillRect(cx - hw - 2, ty + 1, hw * 2 + 4, 4);
+      g.beginPath(); g.moveTo(cx - 12, ty + 2); g.lineTo(cx + 12, ty + 2); g.lineTo(cx + 5, ty - 26); g.closePath(); g.fill();
+      g.fillStyle = '#f2c14e';
+      g.beginPath(); g.arc(cx, ty - 8, 3, 0, Math.PI * 2); g.fill();
+      break;
+    case 'crown':                                  // золотая корона с рубином
+      g.fillStyle = '#f2c14e';
+      g.fillRect(cx - 12, ty - 3, 24, 7);
+      g.beginPath();
+      g.moveTo(cx - 12, ty - 3); g.lineTo(cx - 12, ty - 15); g.lineTo(cx - 6, ty - 8); g.lineTo(cx, ty - 17);
+      g.lineTo(cx + 6, ty - 8); g.lineTo(cx + 12, ty - 15); g.lineTo(cx + 12, ty - 3);
+      g.closePath(); g.fill();
+      g.fillStyle = '#d9534f';
+      g.beginPath(); g.arc(cx, ty + 1, 2.2, 0, Math.PI * 2); g.fill();
+      break;
+  }
+}
+
+// Рисует героя целиком: плащ за спиной, тело с головой, затем шляпа и очки.
+// Её используют и игра, и пьедестал, и магазин, поэтому наряды видны везде.
+function drawCharacter(g, P, hx, hy, step, bob) {
+  drawOutfit(g, P, hx, hy, step, bob, 'back');
+  drawBody(g, P, hx, hy, step, bob);
+  drawOutfit(g, P, hx, hy, step, bob, 'front');
+}
+
+function draw() {
+  // Очищаем холст и включаем масштаб: дальше рисуем в игровых единицах
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  computeView();                      // цвета кадра: биом + время суток + погода
+  COLOR = rgb(view.ink);               // цвет рисунков зависит от биома
+  ctx.fillStyle = rgb(view.sky);       // небо
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+
+  if (!clouds) return;   // игра ещё ни разу не начиналась
+
+  const P = players[current];   // игрок, который сейчас бежит
+
+  // Звёзды (ночью), солнце днём и луна ночью: они идут по небу дугой
+  if (dark > 0.45) {
+    ctx.fillStyle = '#ffffff';
+    for (const s of stars) {
+      ctx.globalAlpha = Math.min(1, (dark - 0.45) * 2) * (0.6 + 0.4 * Math.sin(runTime * 3 + s.ph));
+      ctx.fillRect(s.x, s.y * groundY, 2, 2);
+    }
+    ctx.globalAlpha = 1;
+  }
+  {
+    const isSun = tod < 0.5;
+    const tt = (isSun ? tod : tod - 0.5) / 0.5;                          // путь по небу от 0 до 1
+    const bx = 40 + tt * (WORLD_W - 80);
+    const by = groundY * 0.8 - Math.sin(Math.PI * tt) * groundY * 0.55;  // дуга: выше всего посередине
+    if (isSun) {
+      ctx.fillStyle = 'rgba(255, 213, 74, 0.25)'; ctx.beginPath(); ctx.arc(bx, by, 28, 0, Math.PI * 2); ctx.fill();   // сияние
+      ctx.fillStyle = '#ffd54a'; ctx.beginPath(); ctx.arc(bx, by, 18, 0, Math.PI * 2); ctx.fill();
+    } else {
+      ctx.fillStyle = '#f4f1de'; ctx.beginPath(); ctx.arc(bx, by, 15, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = rgb(view.sky); ctx.beginPath(); ctx.arc(bx + 7, by - 4, 13, 0, Math.PI * 2); ctx.fill();    // «откусываем» месяц
+    }
+  }
+
+  // Облака
+  ctx.fillStyle = rgb(view.cloud);
+  for (const c of clouds) ctx.fillRect(c.x, c.y, c.w, 12);
+
+  // Земля: цветная полоса до низа экрана, сверху линия, на ней «кочки»
+  ctx.fillStyle = rgb(view.ground);
+  ctx.fillRect(0, groundY, WORLD_W, worldH - groundY + 2);
+  ctx.fillStyle = COLOR;
+  ctx.fillRect(0, groundY, WORLD_W, 2);
+  for (let x = -groundScroll; x < WORLD_W; x += 40) ctx.fillRect(x + 10, groundY + 8, 8, 2);
+
+  // Препятствия: каждое рисует функция drawObstacle в зависимости от его типа
+  for (const o of obstacles) drawObstacle(o, runTime);
+  drawCoins();
+
+  if (nightInk) { ctx.shadowColor = 'rgba(255, 255, 255, 0.85)'; ctx.shadowBlur = 5 * scale; }   // ночью фигуры слегка светятся
+  drawMarkers();
+  // Герой. hx, hy — левый верхний угол героя. Рисует его drawCharacter (она же рисует героев на пьедестале).
+  const hx = CONFIG.heroX;
+  const hy = groundY - hero.z - CONFIG.heroH;
+  // step меняется 10 раз в секунду: по нему ножки бегут. В воздухе — не бегут.
+  const step = hero.z > 0 ? 0 : (Math.floor(runTime * 10) % 2);
+  // Голова слегка подпрыгивает при беге (на земле)
+  const bob = hero.z > 0 ? 0 : Math.abs(Math.sin(runTime * 10 * Math.PI)) * 2;
+  if (hurtT > 0 && Math.floor(hurtT * 10) % 2 === 0) ctx.globalAlpha = 0.3;   // после удара герой мигает
+  drawCharacter(ctx, P, hx, hy, step, bob);
+  ctx.globalAlpha = 1;
+
+  ctx.shadowBlur = 0;
+  drawWeather();   // дождь, снег или песчинки поверх всего, но под счётом
+
+  // Счёт, рекорд и имя игрока справа вверху
+  ctx.fillStyle = COLOR;
+  ctx.font = 'bold 26px system-ui, Arial';
+  ctx.textAlign = 'right';
+  ctx.fillText(String(Math.floor(score)).padStart(5, '0'), WORLD_W - 16, 40);
+  ctx.font = '18px system-ui, Arial';
+  ctx.fillText('рекорд ' + Math.max(P.best, Math.floor(score)), WORLD_W - 16, 64);
+  ctx.fillStyle = P.color;
+  ctx.font = 'bold 18px system-ui, Arial';
+  ctx.fillText(displayName(P), WORLD_W - 16, 88);
+
+  // Жизни (сердечки) и собранные монеты слева, под индикатором громкости
+  for (let i = 0; i < dif.lives; i++) drawHeart(ctx, 26 + i * 24, 60, 20, i < lives ? '#e0455a' : 'rgba(120, 120, 120, 0.35)');
+  drawCoinShape(ctx, 26, 100, 9, 1);
+  ctx.fillStyle = COLOR;
+  ctx.font = 'bold 18px system-ui, Arial';
+  ctx.textAlign = 'left';
+  ctx.fillText(String(runCoins), 42, 107);
+
+  // Сообщение («Перепрыгнул: Имя!») ненадолго появляется под названием места
+  if (toastT > 0 && state === 'playing') {
+    ctx.globalAlpha = Math.min(1, toastT);
+    ctx.fillStyle = COLOR;
+    ctx.font = 'bold 22px system-ui, Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(toastText, WORLD_W / 2, groundY * 0.4 + 36);
+    ctx.globalAlpha = 1;
+  }
+
+  // Название места на пару секунд появляется по центру и плавно гаснет
+  if (bannerT > 0 && state === 'playing') {
+    ctx.globalAlpha = Math.min(1, bannerT);
+    ctx.fillStyle = COLOR;
+    ctx.font = 'bold 30px system-ui, Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(BIOMES[biomeIdx].name, WORLD_W / 2, groundY * 0.4);
+    ctx.globalAlpha = 1;
+  }
+
+  // Индикатор громкости: полоска показывает громкость, чёрточка — порог
+  if (micEnabled) {
+    const barX = 16, barY = 20, barW = 180, barH = 12;
+    const maxLevel = 0.5;   // громкость, при которой полоска заполнена полностью
+    ctx.fillStyle = '#e2e2e2';
+    ctx.fillStyle = COLOR; ctx.globalAlpha = 0.2;
+    ctx.fillRect(barX, barY, barW, barH);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = level > threshold ? '#d9534f' : COLOR;   // красная, когда громче порога
+    ctx.fillRect(barX, barY, barW * Math.min(1, level / maxLevel), barH);
+    ctx.fillStyle = '#d9534f';
+    ctx.fillRect(barX + barW * Math.min(1, threshold / maxLevel) - 1, barY - 4, 3, barH + 8);
+    ctx.textAlign = 'left';
+    ctx.font = '14px system-ui, Arial';
+    ctx.fillStyle = COLOR;
+    ctx.fillText('звук', barX, barY + 30);
+  }
+}
+
+/* =====================================================================
+   КАЛИБРОВКА
+   Несколько секунд слушаем «тишину» (фоновый шум), а затем ставим порог
+   выше самого громкого момента этого шума. Так игра не прыгает сама.
+   ===================================================================== */
+let calibStart = 0, calibSum = 0, calibCount = 0, calibMax = 0;
+
+function startCalibration() {
+  state = 'calibrating';
+  calibStart = performance.now();
+  calibSum = calibCount = calibMax = 0;
+  showOverlay('Тишина!', 'Замеряем фоновый шум…', {});
+}
+
+function updateCalibration() {
+  level = readLevel();
+  calibSum += level; calibCount++;
+  calibMax = Math.max(calibMax, level);
+
+  const left = CONFIG.calibrationMs - (performance.now() - calibStart);
+  if (left > 0) {
+    textEl.textContent = 'Замеряем фоновый шум… ' + Math.ceil(left / 1000);
+    return;
+  }
+
+  // Время вышло: считаем порог. Он выше самого громкого момента шума
+  // с запасом, но не меньше 0.06 (иначе в идеальной тишине будет слишком чувствителен).
+  threshold = Math.max(calibMax * 1.5 + 0.03, 0.06);
+  slider.value = Math.round(threshold * 1000);   // показываем порог на ползунке
+  startGame();
+}
+
+/* =====================================================================
+   МЕНЮ И РЕЗУЛЬТАТЫ (окно поверх игры)
+   ===================================================================== */
+// Универсальная функция: показывает окно с заголовком и текстом,
+// а нужные кнопки и блоки включаются через параметры в o:
+//   start       — подпись главной кнопки
+//   startIndex  — какой игрок начнёт после её нажатия (по умолчанию текущий)
+//   row, again, round — ряд дополнительных кнопок на экране результатов
+//   tap, calib, slider — кнопка «касанием», калибровка, ползунок
+//   players     — блок выбора игроков;  board — таблица результатов
+function showOverlay(title, text, o) {
+  titleEl.textContent = title;
+  textEl.textContent = text || '';
+  textEl.classList.toggle('hidden', !text);
+
+  btnStart.classList.toggle('hidden', !o.start);
+  if (o.start) btnStart.textContent = o.start;
+  startIndex = (o.startIndex !== undefined) ? o.startIndex : current;
+  menuShown = !!o.players;
+
+  rowBtns.classList.toggle('hidden', !o.row);
+  btnAgain.classList.toggle('hidden', !o.again);
+  if (o.again) btnAgain.textContent = o.again;
+  btnRound.classList.toggle('hidden', !o.round);
+  podiumCanvas.classList.toggle('hidden', !o.podium);   // пьедестал
+  podiumOn = !!o.podium;
+  menuShopOn = !!o.players;                              // вывеска магазина рисуется на экране игроков
+  shopBlock.classList.toggle('hidden', !o.shop);        // магазин нарядов
+
+  btnTap.classList.toggle('hidden', !o.tap);
+  btnCalib.classList.toggle('hidden', !o.calib);
+  sliderWrap.classList.toggle('hidden', !o.slider);
+  sliderVal.textContent = threshold.toFixed(3);
+
+  playersBlock.classList.toggle('hidden', !o.players);
+  boardEl.classList.toggle('hidden', !o.board);
+  if (o.players) renderPlayers();
+
+  overlay.classList.remove('hidden');
+  overlay.scrollTop = 0;   // показываем окно с самого верха
+}
+
+// Экран выбора игроков (он же стартовый экран)
+function showMenu(first) {
+  const intro = 'Герой бежит сам, а прыгает, когда вы издаёте громкий звук: хлопок, «эй!» или свист.\n' +
+                'Добавьте игроков и передавайте телефон по очереди: у каждого своё фото и свой рекорд.';
+  showOverlay(first ? 'Крикни и прыгни' : 'Игроки',
+              first ? intro : 'Выберите, кто играет, или добавьте игрока.',
+              { start: 'Играть', players: true, tap: !modeChosen, calib: micEnabled, slider: micEnabled });
+}
+
+// Экран результатов после проигрыша
+function showResults(s, isRecord) {
+  const P = players[current];
+  const multi = players.length > 1;
+  const next = (current + 1) % players.length;   // кто ходит следующим
+
+  let text = displayName(P) + ': ' + s;
+  if (!multi) text += '\nРекорд: ' + P.best;
+  if (runCoins > 0) text += '\n🪙 Собрано монет: ' + runCoins + ' (в копилке: ' + P.coins + ')';
+  if (isRecord && s > 0) text += '\n🏆 Новый личный рекорд!';
+
+  // Раунд закончен, когда сыграли все игроки: вместо обычных итогов показываем пьедестал
+  if (multi && players.every(p => p.round !== null)) { showPodium(text); return; }
+
+  showOverlay('Игра окончена', text, {
+    board: multi,
+    start: multi ? 'Дальше: ' + displayName(players[next]) + ' ▶' : 'Играть снова',
+    startIndex: multi ? next : current,
+    row: true,
+    again: multi ? 'Ещё раз: ' + displayName(P) : '',
+    round: multi,
+    slider: micEnabled
+  });
+  if (multi) renderBoard(current);
+}
+
+// Рисует таблицу результатов. justPlayed — номер игрока, который только что играл (его строка выделена).
+// Сортировка по лучшему заходу в раунде; кто ещё не играл в этом раунде — внизу.
+function renderBoard(justPlayed) {
+  boardEl.innerHTML = '';
+  const order = players.map((p, i) => i).sort((a, b) => {
+    const la = players[a].round === null ? -1 : players[a].round;
+    const lb = players[b].round === null ? -1 : players[b].round;
+    return (lb - la) || (players[b].best - players[a].best);
+  });
+
+  let place = 0;   // сколько игроков уже получили место
+  order.forEach(i => {
+    const p = players[i];
+    const played = p.round !== null;
+    const row = document.createElement('div');
+    row.className = 'brow' + (i === justPlayed ? ' me' : '');
+    row.style.borderLeftColor = p.color;   // полоска цвета игрока слева
+
+    const rank = document.createElement('span');
+    rank.className = 'rank';
+    rank.textContent = played ? (['🥇', '🥈', '🥉'][place] || (place + 1) + '.') : '–';
+    if (played) place++;
+
+    const nm = document.createElement('span');
+    nm.className = 'nm';
+    nm.textContent = displayName(p);
+
+    const sc = document.createElement('span');
+    sc.className = 'sc';
+    sc.textContent = played ? p.round : '—';
+
+    const bs = document.createElement('span');
+    bs.className = 'bs';
+    bs.textContent = 'рекорд ' + p.best;
+
+    row.append(rank, nm, sc, bs);
+    boardEl.appendChild(row);
+  });
+}
+
+/* =====================================================================
+   ПЬЕДЕСТАЛ
+   Когда в раунде сыграли все игроки, показываем пьедестал: тройка
+   лучших стоит на ступенях, над головами медали, сверху сыплется
+   конфетти, а герои подпрыгивают от радости. Победитель прыгает выше всех.
+   ===================================================================== */
+const podiumCanvas = document.getElementById('podiumCanvas');
+const PODIUM_W = 320, PODIUM_H = 250;   // размер сцены в обычных пикселях (сам холст в два раза крупнее)
+let podiumOn = false;    // рисуем ли пьедестал прямо сейчас
+let podiumList = [];     // лучшие игроки по порядку: [{ p: игрок, score: очки }, ...]
+let podiumT = 0;         // время анимации (секунды)
+let confetti = [];       // конфетти
+
+function initConfetti() {
+  const colors = ['#f2c14e', '#d9534f', '#3b82c4', '#2e9e5b', '#8e5bc4', '#e08a1e'];
+  confetti = [];
+  for (let i = 0; i < 70; i++) {
+    confetti.push({
+      x: Math.random() * PODIUM_W, y: Math.random() * PODIUM_H,
+      vx: (Math.random() - 0.5) * 30, vy: 40 + Math.random() * 60,   // сносит чуть вбок и тянет вниз
+      s: 4 + Math.random() * 4, c: colors[i % colors.length]
+    });
+  }
+  podiumT = 0;
+}
+
+// Показывает экран конца раунда. text — строка с результатом только что сыгравшего.
+function showPodium(text) {
+  // Порядок мест: по лучшему заходу в раунде (при равенстве — по личному рекорду)
+  const order = players.map((p, i) => i).sort((a, b) =>
+    (players[b].round - players[a].round) || (players[b].best - players[a].best));
+  podiumList = order.slice(0, 3).map(i => ({ p: players[i], score: players[i].round }));
+  initConfetti();
+
+  const medals = ['🥇', '🥈', '🥉'];
+  const names = podiumList.map((e, k) => medals[k] + ' ' + displayName(e.p));
+  showOverlay('🏆 Конец раунда!', text + '\nПоздравляем: ' + names.join(', ') + '!', {
+    podium: true, board: true,
+    start: 'Новый раунд: ' + displayName(players[0]) + ' ▶',
+    startIndex: 0,
+    row: true, again: '', round: false,
+    slider: micEnabled
+  });
+  renderBoard(current);   // таблицу строим сейчас, пока результаты ещё не обнулены
+
+  // Раунд завершён: обнуляем его результаты (личные рекорды остаются),
+  // поэтому в новом раунде на дорожке не будет старых маркеров
+  players.forEach(p => { p.round = null; p.last = null; });
+}
+
+// Рисует медаль на шее героя: красная ленточка уголком и кружок цвета ступени.
+// У героя с фото тело маленькое, а у квадратного герой большое, поэтому размеры разные.
+function drawMedal(g, P, hx, hy, col) {
+  const cx = hx + CONFIG.heroW / 2;
+  // [где ленточка огибает шею, нижняя точка уголка, центр медали, радиус медали]
+  const m = P.img ? [hy + 33, hy + 38, hy + 41, 6] : [hy + 17, hy + 29, hy + 34, 7];   // у квадратного героя медаль висит низко, у ног
+  g.strokeStyle = (P.color === '#d9534f') ? '#ffffff' : '#d9534f';   // ленточка (на красном герое — белая)
+  g.lineWidth = 3;
+  g.beginPath();
+  g.moveTo(cx - 9, m[0]); g.lineTo(cx, m[1]); g.lineTo(cx + 9, m[0]);
+  g.stroke();
+  g.fillStyle = col;                           // сама медаль с тёмной окантовкой
+  g.strokeStyle = 'rgba(0, 0, 0, 0.45)';
+  g.lineWidth = 1.5;
+  g.beginPath();
+  g.arc(cx, m[2], m[3], 0, Math.PI * 2);
+  g.fill();
+  g.stroke();
+}
+
+// Рисует пьедестал (вызывается каждый кадр, пока podiumOn = true)
+function drawPodium(dt) {
+  const g = podiumCanvas.getContext('2d'), W = PODIUM_W, H = PODIUM_H;
+  podiumT += dt;
+  g.setTransform(2, 0, 0, 2, 0, 0);          // холст в два раза крупнее для чёткости
+
+  // Сцена: тёплый фон и пол
+  const floorY = 215;
+  g.fillStyle = '#fff3c9';
+  g.fillRect(0, 0, W, H);
+  g.fillStyle = '#e6cf8a';
+  g.fillRect(0, floorY, W, H - floorY);
+
+  // Ступени: [место (0 — первое), центр по горизонтали, высота, цвет]
+  const slots = [[0, 160, 90, '#f2c14e'], [1, 70, 62, '#c9ced6'], [2, 250, 40, '#cd8b4b']];
+  g.textAlign = 'center';
+  for (const [place, cx, h, col] of slots) {
+    const e = podiumList[place];
+    if (!e) continue;                          // игроков меньше трёх — лишних ступеней нет
+    const top = floorY - h;
+
+    g.fillStyle = col;                         // ступень
+    g.fillRect(cx - 44, top, 88, h);
+    g.fillStyle = 'rgba(255, 255, 255, 0.35)'; // светлая верхняя грань
+    g.fillRect(cx - 44, top, 88, 4);
+    g.fillStyle = '#4a3b12';                   // имя и очки на ступени
+    g.font = 'bold 13px system-ui, Arial';
+    g.fillText(displayName(e.p), cx, top + 20, 80);
+    g.font = '12px system-ui, Arial';
+    g.fillText(String(e.score), cx, top + 35);
+
+    // Герой подпрыгивает от радости: победитель выше всех
+    const jump = Math.abs(Math.sin(podiumT * 5 + place * 1.3)) * (place === 0 ? 12 : 6);
+    const hy = top - CONFIG.heroH - jump;
+    drawCharacter(g, e.p, cx - CONFIG.heroW / 2, hy, 0, 0);
+
+    drawMedal(g, e.p, cx - CONFIG.heroW / 2, hy, col);   // медаль на шее
+  }
+
+  // Конфетти: падает вниз и возвращается наверх
+  for (const c of confetti) {
+    c.x += c.vx * dt;
+    c.y += c.vy * dt;
+    if (c.y > H) { c.y = -8; c.x = Math.random() * W; }
+    g.fillStyle = c.c;
+    g.fillRect(c.x, c.y, c.s, c.s * 0.6);
+  }
+}
+
+/* =====================================================================
+   МАГАЗИН НАРЯДОВ
+   Монеты, собранные на трассе, можно потратить между играми: купить
+   наряд из списка OUTFITS и надеть его (в каждой «ячейке» — один наряд).
+   Купленное и надетое сохраняется вместе с игроком.
+   ===================================================================== */
+const shopBlock   = document.getElementById('shopBlock');
+const shopCanvas  = document.getElementById('shopCanvas');
+const shopList    = document.getElementById('shopList');
+const btnShopBack = document.getElementById('btnShopBack');
+const menuShop    = document.getElementById('menuShop');    // большая картинка магазина в меню
+const btnShop2    = document.getElementById('btnShop2');    // маленькая кнопка на экране результатов
+let shopPlayer = null;   // чей магазин сейчас открыт
+let menuShopOn = false;  // рисуем ли вывеску магазина в меню прямо сейчас
+let menuShopT = 0;       // время анимации вывески (секунды)
+
+/* ---------- Картинки нарядов ----------
+   Дети могут ещё не уметь читать, поэтому в магазине и на витрине наряды
+   показаны картинками. Картинку наряда рисует та же функция drawOutfit,
+   что и на герое, просто на «пустом» герое и в увеличенном виде.
+   ICON_BOX — «рамка» каждого наряда в координатах героя: [x, y, ширина, высота].
+   По ней картинка вписывается в квадрат нужного размера. */
+const ICON_BOX = {
+  cap:     [6, -9, 36, 16],
+  bow:     [12, -9, 24, 19],
+  party:   [9, -26, 22, 30],
+  glasses: [14, 7, 24, 10],
+  cape:    [-13, 5, 22, 35],
+  wizard:  [-3, -27, 46, 33],
+  crown:   [7, -18, 26, 23]
+};
+
+// Рисует наряд id в квадрат size × size с левым верхним углом (x, y)
+function drawOutfitIcon(g, id, x, y, size) {
+  const it = OUTFIT_BY_ID[id], b = ICON_BOX[id];
+  if (!it || !b) return;
+  const s = Math.min(size / b[2], size / b[3]);     // во сколько раз увеличить
+  const dummy = { img: null, color: '#999', wear: { head: null, face: null, back: null } };
+  dummy.wear[it.slot] = id;                         // «пустой» герой, на котором надет только этот наряд
+  g.save();
+  g.translate(x + size / 2 - (b[0] + b[2] / 2) * s, y + size / 2 - (b[1] + b[3] / 2) * s);
+  g.scale(s, s);
+  drawOutfit(g, dummy, 0, 0, 0, 0, it.slot === 'back' ? 'back' : 'front');
+  g.restore();
+}
+
+function openShop() {
+  shopPlayer = players[current];
+  showOverlay('🛍 Магазин', '', { shop: true });
+  renderShop();
+}
+
+function renderShop() {
+  const P = shopPlayer;
+  titleEl.textContent = '🛍 ' + displayName(P);
+  textEl.textContent = '🪙 ' + P.coins;             // только число: слов в магазине почти нет
+  textEl.classList.remove('hidden');
+
+  // Предпросмотр: герой в нарядах (сцена 80×80, увеличенная в 3 раза)
+  const g = shopCanvas.getContext('2d');
+  g.setTransform(3, 0, 0, 3, 0, 0);
+  g.fillStyle = '#fff3c9';
+  g.fillRect(0, 0, 80, 80);
+  g.fillStyle = '#e6cf8a';
+  g.fillRect(0, 72, 80, 8);
+  drawCharacter(g, P, 20, 22, 0, 0);
+
+  // Витрина: у каждого наряда карточка с картинкой.
+  //   не куплен — внизу цена в монетах (серая, если монет не хватает);
+  //   куплен — цены нет, нажатие надевает или снимает;
+  //   надет — зелёная рамка и галочка.
+  shopList.innerHTML = '';
+  for (const it of OUTFITS) {
+    const owned = P.owned.includes(it.id);
+    const worn = P.wear[it.slot] === it.id;
+
+    const card = document.createElement('button');
+    card.className = 'scard' + (worn ? ' worn' : '');
+    card.setAttribute('aria-label', it.name);        // название остаётся для чтецов экрана
+    card.disabled = !owned && P.coins < it.cost;     // не хватает монет — карточка серая
+
+    const pic = document.createElement('canvas');
+    pic.width = pic.height = 144;                    // в двойном размере для чёткости
+    drawOutfitIcon(pic.getContext('2d'), it.id, 8, 8, 128);
+
+    const price = document.createElement('span');
+    price.className = 'price';
+    price.textContent = worn ? '✅' : owned ? '' : '🪙 ' + it.cost;
+
+    card.append(pic, price);
+    card.addEventListener('click', () => {
+      if (!owned) {
+        if (P.coins < it.cost) return;
+        P.coins -= it.cost;                          // покупаем и сразу надеваем
+        P.owned.push(it.id);
+        P.wear[it.slot] = it.id;
+      } else {
+        P.wear[it.slot] = worn ? null : it.id;       // надеть или снять
+      }
+      savePlayers();
+      renderShop();
+    });
+    shopList.appendChild(card);
+  }
+}
+
+/* ---------- Вывеска магазина в главном меню ----------
+   Большая картинка (как пьедестал): полосатый навес, вывеска с монетой и
+   числом монет игрока, полки с нарядами и сам герой в своих нарядах.
+   Нажатие на картинку открывает магазин. Рисуется каждый кадр. */
+function drawMenuShop(dt) {
+  const P = players[current];
+  const g = menuShop.getContext('2d'), W = 320, H = 200;
+  menuShopT += dt;
+  const t = menuShopT;
+  g.setTransform(2, 0, 0, 2, 0, 0);                  // холст в два раза крупнее для чёткости
+
+  // Фон и пол
+  g.fillStyle = '#fff3c9';
+  g.fillRect(0, 0, W, H);
+  g.fillStyle = '#e6cf8a';
+  g.fillRect(0, 172, W, H - 172);
+
+  // Стена магазина и шкаф с двумя полками
+  g.fillStyle = '#f7d9a0';
+  g.fillRect(18, 56, 284, 116);
+  g.fillStyle = '#b98a55';
+  g.fillRect(30, 74, 182, 96);
+  g.fillStyle = '#e4c08a';
+  g.fillRect(34, 78, 174, 88);
+  g.fillStyle = '#b98a55';
+  g.fillRect(34, 118, 174, 4);                       // верхняя полка
+  g.fillRect(34, 162, 174, 4);                       // нижняя полка
+
+  // Наряды на полках: четыре сверху, остальные снизу, а следом блестящая монета
+  OUTFITS.forEach((it, k) => {
+    const col = k % 4, row = Math.floor(k / 4);
+    drawOutfitIcon(g, it.id, 41 + col * 44, row ? 128 : 86, 30);
+  });
+  const nextSlot = OUTFITS.length;
+  if (nextSlot < 8) {
+    const col = nextSlot % 4, row = Math.floor(nextSlot / 4);
+    drawCoinShape(g, 56 + col * 44, (row ? 143 : 101), 10, 0.3 + 0.7 * Math.abs(Math.cos(t * 3)));
+  }
+
+  // Герой игрока (в своих нарядах) слегка подпрыгивает перед магазином
+  const bounce = Math.abs(Math.sin(t * 3)) * 4;
+  drawCharacter(g, P, 237, 172 - CONFIG.heroH - bounce, 0, 0);
+
+  // Навес: красно-белые полосы с лёгким покачиванием
+  g.fillStyle = '#8a5a2b';
+  g.fillRect(6, 30, 308, 7);
+  const n = 8, sw = 300 / n;
+  for (let i = 0; i < n; i++) {
+    const x = 10 + i * sw;
+    g.fillStyle = (i % 2) ? '#ffffff' : '#d9534f';
+    g.fillRect(x, 37, sw, 20);
+    g.beginPath();
+    g.arc(x + sw / 2, 57 + Math.sin(t * 2 + i) * 1.2, sw / 2, 0, Math.PI);   // закруглённый край
+    g.fill();
+  }
+
+  // Вывеска сверху: монета и число монет игрока
+  g.fillStyle = '#ffffff';
+  g.fillRect(112, 2, 96, 26);
+  g.strokeStyle = '#8a5a2b';
+  g.lineWidth = 2;
+  g.strokeRect(112, 2, 96, 26);
+  drawCoinShape(g, 132, 15, 8, 0.3 + 0.7 * Math.abs(Math.cos(t * 3)));
+  g.fillStyle = '#4a3b12';
+  g.font = 'bold 18px system-ui, Arial';
+  g.textAlign = 'left';
+  g.textBaseline = 'middle';
+  g.fillText(String(P.coins), 146, 16, 56);
+
+  // Золотая рамка мягко мигает: подсказка, что картинку можно нажать
+  g.strokeStyle = 'rgba(242, 193, 78, ' + (0.45 + 0.45 * Math.sin(t * 4)) + ')';
+  g.lineWidth = 4;
+  g.strokeRect(2, 2, W - 4, H - 4);
+}
+
+menuShop.addEventListener('click', openShop);
+btnShop2.addEventListener('click', openShop);
+btnShopBack.addEventListener('click', () => showMenu(false));
+
+// Главная кнопка: «Играть», «Дальше: Имя», «Играть снова»
+btnStart.addEventListener('click', async () => {
+  current = startIndex;   // выбираем, кто играет
+
+  // Способ управления уже выбран раньше (микрофон или касание) — просто стартуем
+  if (modeChosen) { startGame(); return; }
+
+  // Иначе первый запуск: просим микрофон
+  showOverlay('Микрофон', 'Разрешите доступ к микрофону в окошке браузера…', {});
+  const ok = await setupMic();
+  if (ok) {
+    micEnabled = true;
+    modeChosen = true;
+    startCalibration();
+  } else {
+    showOverlay('Нет доступа к микрофону',
+      'Проверьте разрешение в настройках браузера.\nИгра должна быть открыта по HTTPS-ссылке (не как файл).\nМожно играть касанием экрана.',
+      { start: 'Попробовать ещё раз', tap: true });
+  }
+});
+
+// «Ещё раз»: тот же игрок пробует снова
+btnAgain.addEventListener('click', () => startGame());
+
+// «Новый раунд»: стираем результаты последних игр (личные рекорды остаются)
+btnRound.addEventListener('click', () => {
+  players.forEach(p => { p.last = null; p.round = null; });
+  renderBoard(-1);
+  btnRound.classList.add('hidden');
+});
+
+// «Игроки»: открываем экран выбора и редактирования игроков
+btnPlayers.addEventListener('click', () => showMenu(false));
+
+// Нажали «Откалибровать заново»
+btnCalib.addEventListener('click', () => { audioCtx.resume(); startCalibration(); });
+
+// Нажали «Играть касанием»
+btnTap.addEventListener('click', () => { micEnabled = false; modeChosen = true; startGame(); });
+
+// Двигаем ползунок — меняется порог громкости
+slider.addEventListener('input', () => {
+  threshold = slider.value / 1000;
+  sliderVal.textContent = threshold.toFixed(3);
+});
+
+/* =====================================================================
+   ГЛАВНЫЙ ЦИКЛ
+   requestAnimationFrame вызывает нашу функцию перед каждой перерисовкой
+   экрана (обычно 60 раз в секунду) — это и есть «сердце» игры.
+   ===================================================================== */
+let lastTime = performance.now();
+
+function loop(now) {
+  // Сколько секунд прошло с прошлого кадра (не больше 0.05, чтобы после
+  // переключения вкладки герой не «телепортировался»)
+  const dt = Math.min(0.05, (now - lastTime) / 1000);
+  lastTime = now;
+
+  if (state === 'calibrating') updateCalibration();
+  else update(dt);
+
+  draw();
+  if (menuShopOn) drawMenuShop(dt);   // вывеска магазина в меню (она слегка анимирована)
+  if (podiumOn) drawPodium(dt);   // анимация пьедестала, когда он на экране
+  requestAnimationFrame(loop);
+}
+
+/* =====================================================================
+   ЗАПУСК
+   ===================================================================== */
+loadPlayers();
+slider.value = Math.round(threshold * 1000);
+showMenu(true);
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
