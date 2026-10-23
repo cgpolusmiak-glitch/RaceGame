@@ -184,6 +184,11 @@
 
   /* Вывеска магазина в главном меню (рисует функция drawMenuShop) */
   #menuShop { width: 320px; max-width: 100%; height: auto; border-radius: 14px; cursor: pointer; }
+  
+    /* Поздравление на первом экране */
+  #birthday { text-align: center; }
+  #birthday img { width: 200px; max-width: 70%; height: auto; border-radius: 16px; image-rendering: pixelated; }
+  #birthday p { margin: 10px 0 0; font-size: 24px; font-weight: 700; color: #d9534f; }
 </style>
 </head>
 
@@ -207,6 +212,10 @@
 <!-- Окно с меню. Его содержимое меняет JavaScript (функция showOverlay) -->
 <div id="overlay">
   <div id="panel">
+      <div id="birthday" class="hidden">
+      <img src="icon-512.png" alt="">
+      <p>🎂 С днём рождения, Серафим! 🎉</p>
+    </div>
     <h1 id="title">Крикни и прыгни</h1>
     <p id="text"></p>
 
@@ -1708,6 +1717,7 @@ function updateCalibration() {
 //   tap, calib, slider — кнопка «касанием», калибровка, ползунок
 //   players     — блок выбора игроков;  board — таблица результатов
 function showOverlay(title, text, o) {
+  document.getElementById('birthday').classList.toggle('hidden', !o.birthday);
   titleEl.textContent = title;
   textEl.textContent = text || '';
   textEl.classList.toggle('hidden', !text);
@@ -1742,11 +1752,11 @@ function showOverlay(title, text, o) {
 
 // Экран выбора игроков (он же стартовый экран)
 function showMenu(first) {
-  const intro = 'Герой бежит сам, а прыгает, когда вы издаёте громкий звук: хлопок, «эй!» или свист.\n' +
-                'Добавьте игроков и передавайте телефон по очереди: у каждого своё фото и свой рекорд.';
-  showOverlay(first ? 'Крикни и прыгни' : 'Игроки',
+  const intro = 'Чтобы прыгнуть в игре - пошумите!\n';
+               // 'Добавьте игроков и передавайте телефон по очереди: у каждого своё фото и свой рекорд.';
+  showOverlay(first ? 'Праздничная гонка' : 'Игроки',
               first ? intro : 'Выберите, кто играет, или добавьте игрока.',
-              { start: 'Играть', players: true, tap: !modeChosen, mic: modeChosen && !micEnabled, calib: micEnabled, slider: micEnabled });
+              { start: 'Играть', players: true, tap: !modeChosen, mic: modeChosen && !micEnabled, calib: micEnabled, slider: micEnabled, birthday: first });
 }
 
 // Экран результатов после проигрыша
